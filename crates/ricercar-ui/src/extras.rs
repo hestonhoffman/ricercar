@@ -539,6 +539,8 @@ fn rate_histogram(ui: &Ui) -> Vec<ricercar_core::RateCount> {
 }
 
 pub fn refresh_devices(ui: &Ui) {
+    // A card plugged in or out may now sit behind another hw: name.
+    crate::outputs::forget_cards();
     let current = ui.ctx.ctl.device_name();
     let cache = ui.saved_state.borrow().dac_caps.clone();
     let dsd = ui.ctx.config.read().unwrap().audio.dsd.clone();

@@ -144,8 +144,56 @@ pub fn rev() -> u64 {
     STATE.with(|s| s.borrow().rev)
 }
 
+/// "BIG KNOB STUDIO: USB Audio" → "BIG KNOB STUDIO": the card name when
+/// its device name is ALSA's generic one for USB cards.
+pub fn card_label(description: &str) -> &str {
+    description
+        .strip_suffix(": USB Audio")
+        .unwrap_or(description)
+}
+
+thread_local! {
+    /// ALSA card names by device name, read once from the device list.
+    static CARDS: RefCell<std::collections::HashMap<String, Option<String>>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// The card's name for an ALSA hardware device (`hw:3,0`), read from the
+/// device list without opening anything; `None` when it isn't listed.
+fn hw_name(device: &str) -> Option<String> {
+    if !(device.starts_with("hw:") || device.starts_with("plughw:")) {
+        return None;
+    }
+    if std::env::var_os("RICERCAR_SNAPSHOT").is_some() {
+        return None;
+    }
+    CARDS.with(|c| {
+        c.borrow_mut()
+            .entry(device.to_string())
+            .or_insert_with(|| {
+                ricercar_audio::device::list_devices()
+                    .into_iter()
+                    .find(|d| d.name == device)
+                    .map(|d| card_label(&d.description).to_string())
+            })
+            .clone()
+    })
+}
+
+/// Forget the card names read so far (after a rescan of the devices).
+pub fn forget_cards() {
+    CARDS.with(|c| c.borrow_mut().clear());
+}
+
 /// How to show `device` with what is known now (never blocks).
 pub fn describe(ui: &Ui, device: &str) -> Shown {
+    if let Some(name) = hw_name(device) {
+        return Shown {
+            label: name.clone(),
+            playing: name,
+            absent: None,
+        };
+    }
     let saved = ui.saved_state.borrow();
     let remembered = pipewire_node(device).and_then(|n| saved.device_name(n));
     STATE.with(|s| resolve(device, s.borrow().seen.as_ref(), remembered))
@@ -328,6 +376,15 @@ mod tests {
         assert_eq!(resolve(BT, None, None).playing, "Bluetooth device");
         let d = "pipewire:NODE=\"tunnel.office\"";
         assert_eq!(resolve(d, None, None).label, "tunnel.office");
+    }
+
+    #[test]
+    fn card_names() {
+        assert_eq!(card_label("BIG KNOB STUDIO: USB Audio"), "BIG KNOB STUDIO");
+        assert_eq!(
+            card_label("HD-Audio Generic: HDMI 0"),
+            "HD-Audio Generic: HDMI 0"
+        );
     }
 
     #[test]

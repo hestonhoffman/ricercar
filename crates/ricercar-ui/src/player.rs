@@ -721,7 +721,15 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         });
     }
     let (dev_desc, dev_state) = match c.device_kind {
-        DeviceKind::Hardware => (format!("{} · {}", c.device, t("exclusive, no mixer")), 0),
+        DeviceKind::Hardware => {
+            // "BIG KNOB STUDIO (hw:3,0)": the card's name, then the device.
+            let shown = if output.label != c.device {
+                format!("{} ({})", output.label, c.device)
+            } else {
+                c.device.clone()
+            };
+            (format!("{shown} · {}", t("exclusive, no mixer")), 0)
+        }
         DeviceKind::Virtual => (
             format!(
                 "{} · {}",
