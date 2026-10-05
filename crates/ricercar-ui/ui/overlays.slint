@@ -363,7 +363,9 @@ component ChainView inherits VerticalLayout {
         }
     }
     Text {
-        text: App.bitperfect ? @tr("Every sample reaches the DAC exactly as it is in the file.") : @tr("Volume below 100 %, ReplayGain, mute or a shared (non hw:) device alters the samples.");
+        text: App.fixed-volume
+            ? (App.bitperfect ? @tr("Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume.") : @tr("Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples."))
+            : (App.bitperfect ? @tr("Every sample reaches the DAC exactly as it is in the file.") : @tr("Volume below 100 %, ReplayGain, mute or a shared (non hw:) device alters the samples."));
         font-size: Theme.fs-md;
         color: #ffffffb3;
         wrap: word-wrap;

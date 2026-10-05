@@ -422,5 +422,13 @@
 "Settings for {name}": "{name} の設定",
 "At least {n}": "{n} 以上",
 "At most {n}": "{n} 以下",
-"At most {n} characters": "{n} 文字以内"
+"At most {n} characters": "{n} 文字以内",
+"Fixed volume (bit-perfect)": "音量固定（bit-perfect）",
+"Volume stays at 100 %; changes from this app, phones and media keys are ignored. Use your amplifier's volume.": "音量を100 %に固定し、アプリ・スマートフォン・メディアキーからの変更を無視します。アンプで調整してください。",
+"Volume fixed at 100 % (Settings → Audio output)": "音量は100 %に固定されています（設定 → オーディオ出力）",
+"Volume fixed at 100 %": "音量は100 %に固定",
+"Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume.": "サンプルは手を加えられずにデバイスへ届いています。ネイティブのレートで、リサンプリング、ミキサー、音量処理はありません。音量は100 %に固定されています。音量はアンプで調整してください。",
+"Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback.": "経路のどこかでサンプルが変更されています（ReplayGain、またはミキシングを行うデバイス）。音量は100 %に固定されています。bit-perfect 再生には、ReplayGain をオフにして hw: デバイスを使用してください。",
+"Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume.": "すべてのサンプルがファイルのままの状態で DAC に届きます。音量は100 %に固定されています。音量はアンプで調整してください。",
+"Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples.": "音量は100 %に固定されています。ReplayGain、または共有デバイス（hw: 以外）がサンプルを変更しています。"
 }

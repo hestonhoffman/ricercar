@@ -154,12 +154,24 @@ msgid "Altered signal path"
 msgstr "信号が変更されています"
 
 msgctxt "ChainPanel"
+msgid "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume."
+msgstr "サンプルは手を加えられずにデバイスへ届いています。ネイティブのレートで、リサンプリング、ミキサー、音量処理はありません。音量は100 %に固定されています。音量はアンプで調整してください。"
+
+msgctxt "ChainPanel"
+msgid "Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback."
+msgstr "経路のどこかでサンプルが変更されています（ReplayGain、またはミキシングを行うデバイス）。音量は100 %に固定されています。bit-perfect 再生には、ReplayGain をオフにして hw: デバイスを使用してください。"
+
+msgctxt "ChainPanel"
 msgid "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing."
 msgstr "サンプルは手を加えられずにデバイスへ届いています。ネイティブのレートで、リサンプリング、ミキサー、音量処理はありません。"
 
 msgctxt "ChainPanel"
 msgid "Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback."
 msgstr "経路のどこかでサンプルが変更されています（音量、ReplayGain、ミュート、またはミキシングを行うデバイス）。bit-perfect 再生には、音量を100 %にして hw: デバイスを使用してください。"
+
+msgctxt "VolumeControl"
+msgid "Volume fixed at 100 % (Settings → Audio output)"
+msgstr "音量は100 %に固定されています（設定 → オーディオ出力）"
 
 msgctxt "VolumeControl"
 msgid "Mute"
@@ -404,6 +416,14 @@ msgstr "連続再生"
 msgctxt "SettingsPage"
 msgid "When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin."
 msgstr "キューがこの機能に対応したプラグインの曲で終わったとき、そのプラグインから似た曲を続けて再生します。"
+
+msgctxt "SettingsPage"
+msgid "Fixed volume (bit-perfect)"
+msgstr "音量固定（bit-perfect）"
+
+msgctxt "SettingsPage"
+msgid "Volume stays at 100 %; changes from this app, phones and media keys are ignored. Use your amplifier's volume."
+msgstr "音量を100 %に固定し、アプリ・スマートフォン・メディアキーからの変更を無視します。アンプで調整してください。"
 
 msgctxt "SettingsPage"
 msgid "Library"
@@ -798,6 +818,14 @@ msgstr "Bit-perfect"
 msgctxt "ChainView"
 msgid "Altered signal path"
 msgstr "信号が変更されています"
+
+msgctxt "ChainView"
+msgid "Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume."
+msgstr "すべてのサンプルがファイルのままの状態で DAC に届きます。音量は100 %に固定されています。音量はアンプで調整してください。"
+
+msgctxt "ChainView"
+msgid "Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples."
+msgstr "音量は100 %に固定されています。ReplayGain、または共有デバイス（hw: 以外）がサンプルを変更しています。"
 
 msgctxt "ChainView"
 msgid "Every sample reaches the DAC exactly as it is in the file."

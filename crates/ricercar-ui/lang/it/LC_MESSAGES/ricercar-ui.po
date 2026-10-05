@@ -155,12 +155,24 @@ msgid "Altered signal path"
 msgstr "Percorso del segnale alterato"
 
 msgctxt "ChainPanel"
+msgid "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume."
+msgstr "I campioni arrivano intatti al dispositivo: frequenza nativa, nessun ricampionamento, nessun mixer, nessuna elaborazione del volume. Volume fisso al 100 %: regola il volume sull'amplificatore."
+
+msgctxt "ChainPanel"
+msgid "Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback."
+msgstr "Qualcosa nella catena modifica i campioni (ReplayGain o un dispositivo condiviso). Il volume è fisso al 100 %; disattiva ReplayGain e usa un dispositivo hw: per una riproduzione bit-perfect."
+
+msgctxt "ChainPanel"
 msgid "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing."
 msgstr "I campioni arrivano intatti al dispositivo: frequenza nativa, nessun ricampionamento, nessun mixer, nessuna elaborazione del volume."
 
 msgctxt "ChainPanel"
 msgid "Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback."
 msgstr "Qualcosa nella catena modifica i campioni (volume, ReplayGain, muto o un dispositivo condiviso). Imposta il volume al 100 % e usa un dispositivo hw: per una riproduzione bit-perfect."
+
+msgctxt "VolumeControl"
+msgid "Volume fixed at 100 % (Settings → Audio output)"
+msgstr "Volume fisso al 100 % (Impostazioni → Uscita audio)"
 
 msgctxt "VolumeControl"
 msgid "Mute"
@@ -405,6 +417,14 @@ msgstr "Riproduzione continua"
 msgctxt "SettingsPage"
 msgid "When the queue ends on a track from a plugin that offers it, keep playing similar tracks from that plugin."
 msgstr "Quando la coda termina con un brano di un plugin che lo offre, continua con brani simili da quel plugin."
+
+msgctxt "SettingsPage"
+msgid "Fixed volume (bit-perfect)"
+msgstr "Volume fisso (bit-perfect)"
+
+msgctxt "SettingsPage"
+msgid "Volume stays at 100 %; changes from this app, phones and media keys are ignored. Use your amplifier's volume."
+msgstr "Volume fisso al 100 %; app, telefoni e tasti multimediali non lo cambiano. Regolalo sull'amplificatore."
 
 msgctxt "SettingsPage"
 msgid "Library"
@@ -801,6 +821,14 @@ msgstr "Bit-perfect"
 msgctxt "ChainView"
 msgid "Altered signal path"
 msgstr "Percorso del segnale alterato"
+
+msgctxt "ChainView"
+msgid "Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume."
+msgstr "Ogni campione arriva al DAC esattamente com'è nel file. Volume fisso al 100 %: regola il volume sull'amplificatore."
+
+msgctxt "ChainView"
+msgid "Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples."
+msgstr "Volume fisso al 100 %. ReplayGain o un dispositivo condiviso (non hw:) modifica i campioni."
 
 msgctxt "ChainView"
 msgid "Every sample reaches the DAC exactly as it is in the file."

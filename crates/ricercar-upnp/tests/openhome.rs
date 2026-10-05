@@ -391,6 +391,58 @@ fn gena_events_openhome_and_lastchange() {
 }
 
 #[test]
+fn fixed_volume_ignores_control_points() {
+    let r = rig("oh-fixed", false);
+    let p = r.port();
+    r.ctl.set_volume(40);
+    r.ctl.set_fixed_volume(true);
+    let vol = |a: &str, args: &[(&str, &str)]| soap(p, "ohvolume", VOLUME, a, args);
+    let rcs = |a: &str, args: &[(&str, &str)]| soap(p, "rcs", RCS, a, args);
+    let master = [("InstanceID", "0"), ("Channel", "Master")];
+
+    let (cb, rx) = callback_server();
+    subscribe(p, "/evt/ohvolume", &cb);
+    let init = next_event(&rx, "<Volume>");
+    assert!(init.contains("SEQ: 0"), "{init}");
+    assert!(init.contains("<Volume>100</Volume>"), "{init}");
+    assert!(init.contains("<Mute>false</Mute>"), "{init}");
+    let (cb2, rx2) = callback_server();
+    subscribe(p, "/evt/rcs", &cb2);
+    let init = next_event(&rx2, "LastChange");
+    assert!(init.contains("SEQ: 0"), "{init}");
+
+    // Every request succeeds and is ignored.
+    for (a, args) in [
+        ("SetVolume", &[("Value", "30")][..]),
+        ("VolumeDec", &[]),
+        ("VolumeInc", &[]),
+        ("SetMute", &[("Value", "true")]),
+    ] {
+        let resp = vol(a, args);
+        assert!(resp.contains("200 OK"), "{a}: {resp}");
+        assert_eq!(fault_code(&resp), None, "{a}");
+    }
+    assert_eq!(field(&vol("Volume", &[]), "Value"), "100");
+    assert_eq!(field(&vol("Mute", &[]), "Value"), "false");
+    let resp = rcs("SetVolume", &[master[0], master[1], ("DesiredVolume", "5")]);
+    assert_eq!(fault_code(&resp), None, "{resp}");
+    assert_eq!(field(&rcs("GetVolume", &master), "CurrentVolume"), "100");
+    assert_eq!(field(&rcs("GetMute", &master), "CurrentMute"), "0");
+
+    // Subscribers get the real value again so they resync.
+    let ev = next_event(&rx, "<Volume>100</Volume>");
+    assert!(!ev.contains("SEQ: 0"), "{ev}");
+    let ev = next_event(&rx2, "Volume");
+    assert!(!ev.contains("SEQ: 0"), "{ev}");
+    assert!(ev.contains("val=&quot;100&quot;"), "{ev}");
+
+    // Unlocked: control points drive the volume again.
+    r.ctl.set_fixed_volume(false);
+    vol("SetVolume", &[("Value", "30")]);
+    assert_eq!(field(&vol("Volume", &[]), "Value"), "30");
+}
+
+#[test]
 fn insert_refuses_uris_outside_the_library() {
     let r = rig("oh-foreign", true);
     let p = r.port();

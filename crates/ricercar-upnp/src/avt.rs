@@ -330,6 +330,7 @@ impl Renderer {
             "SetVolume" => match args.num::<u32>("DesiredVolume") {
                 Some(v) if v <= 100 => {
                     self.ctl.set_volume(v);
+                    self.resync_volume();
                     ok(&[])
                 }
                 _ => Reply::Err(402, "Invalid Args"),
@@ -341,6 +342,7 @@ impl Renderer {
             "SetMute" => match args.bool("DesiredMute") {
                 Some(m) => {
                     self.ctl.set_muted(m);
+                    self.resync_volume();
                     ok(&[])
                 }
                 None => Reply::Err(402, "Invalid Args"),

@@ -372,6 +372,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     );
     ctl.set_resolver(Arc::new(plugins.clone()));
     ctl.set_continuous(cfg.audio.continuous_playback);
+    ctl.set_fixed_volume(cfg.audio.fixed_volume);
     plugins.attach(&ctl);
     plugins.set_output(output_info(&cfg.audio.device, None));
     plugins.set_language(&cfg.ui.language);
@@ -596,6 +597,7 @@ impl AppContext {
                 .set_output(output_info(&cfg.audio.device, None));
         }
         self.ctl.set_continuous(cfg.audio.continuous_playback);
+        self.ctl.set_fixed_volume(cfg.audio.fixed_volume);
         self.plugins.set_language(&cfg.ui.language);
         if old_plugins != cfg.plugins {
             self.apply_plugins();

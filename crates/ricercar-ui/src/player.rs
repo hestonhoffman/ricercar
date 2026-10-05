@@ -63,6 +63,10 @@ pub fn wire(ui: &Rc<Ui>) {
     });
     app.on_set_volume(|v| {
         with_ui(|ui| {
+            // Fixed volume: the controller ignores it; keep showing 100 %.
+            if ui.ctx.ctl.volume_fixed() {
+                return;
+            }
             let pct = (v.clamp(0.0, 1.0) * 100.0).round() as u32;
             ui.ctx.ctl.set_volume(pct);
             if ui.ctx.ctl.lock().muted && pct > 0 {
@@ -199,6 +203,7 @@ fn tick_inner(ui: &Rc<Ui>) {
     app.set_dur_ms(st.dur_ms.min(i32::MAX as u64) as i32);
     app.set_volume(st.volume as f32 / 100.0);
     app.set_muted(st.muted);
+    app.set_fixed_volume(st.fixed_volume);
     app.set_shuffle(st.shuffle);
     app.set_repeat(match st.repeat {
         Repeat::Off => 0,
@@ -505,12 +510,13 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     let c = &chain;
     let fmt = c.format;
     let sig = format!(
-        "{:?}{:?}{}{}{}{}{:?}{:?}",
+        "{:?}{:?}{}{}{}{}{}{:?}{:?}",
         fmt,
         c.container,
         c.bit_perfect,
         st.volume,
         st.muted,
+        st.fixed_volume,
         c.device,
         info.as_ref().map(|i| &i.uri),
         st.delivery
@@ -616,6 +622,14 @@ fn update_chain(ui: &Ui, st: &CtlState) {
             label: t("Processing").into(),
             value: value.into(),
             state: 1,
+        });
+    }
+    // Fixed at 100 %: no volume processing, said explicitly.
+    if st.fixed_volume {
+        hops.push(ChainHop {
+            label: t("Volume").into(),
+            value: t("Volume fixed at 100 %").into(),
+            state: 0,
         });
     }
     if let Some(f) = fmt {

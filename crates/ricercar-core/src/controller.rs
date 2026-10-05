@@ -248,6 +248,9 @@ pub struct CtlState {
     pub chain: ChainInfo,
     pub volume: u32,
     pub muted: bool,
+    /// `[audio] fixed_volume`: volume held at 100 % and unmuted, every
+    /// volume or mute change ignored.
+    pub fixed_volume: bool,
     pub stream_title: Option<String>,
     /// Bumped on every queue mutation.
     pub queue_rev: u64,
@@ -357,6 +360,8 @@ pub struct Controller {
     rg_preamp: Mutex<f32>,
     resolver: Arc<RwLock<Option<Arc<dyn Resolver>>>>,
     continuous: Arc<AtomicBool>,
+    /// Serialises volume and mute changes against the fixed-volume lock.
+    volume_gate: Mutex<()>,
 }
 
 fn chain_stub(device: &str) -> ChainInfo {
@@ -405,6 +410,7 @@ impl Controller {
                 chain: chain_stub(device),
                 volume: 100,
                 muted: false,
+                fixed_volume: false,
                 stream_title: None,
                 queue_rev: 0,
                 resolving: None,
@@ -422,6 +428,7 @@ impl Controller {
             rg_preamp: Mutex::new(0.0),
             resolver: Arc::new(RwLock::new(None)),
             continuous: Arc::new(AtomicBool::new(false)),
+            volume_gate: Mutex::new(()),
         };
         ctl.spawn_bridge();
         ctl
@@ -1028,17 +1035,66 @@ impl Controller {
         self.seek_ms(target.max(0) as u64);
     }
 
+    fn volume_gate(&self) -> MutexGuard<'_, ()> {
+        self.volume_gate.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Ignored while the volume is fixed; the event still goes out so
+    /// whoever asked shows the real value again.
     pub fn set_volume(&self, percent: u32) {
         let percent = percent.min(100);
-        self.lock().volume = percent;
-        self.player().set_volume(percent);
+        let _gate = self.volume_gate();
+        {
+            let mut st = self.lock();
+            if !st.fixed_volume {
+                st.volume = percent;
+                drop(st);
+                self.player().set_volume(percent);
+            }
+        }
         self.events.publish(CtlEvent::VolumeChanged);
     }
 
+    /// Ignored while the volume is fixed, like [`Controller::set_volume`].
     pub fn set_muted(&self, muted: bool) {
-        self.lock().muted = muted;
-        self.player().set_mute(muted);
+        let _gate = self.volume_gate();
+        {
+            let mut st = self.lock();
+            if !st.fixed_volume {
+                st.muted = muted;
+                drop(st);
+                self.player().set_mute(muted);
+            }
+        }
         self.events.publish(CtlEvent::VolumeChanged);
+    }
+
+    /// Fixed volume (`[audio] fixed_volume`): on, the volume goes to 100 %
+    /// unmuted and every later volume or mute change, from any caller, is
+    /// ignored until it is turned off. ReplayGain and preamp are separate.
+    pub fn set_fixed_volume(&self, on: bool) {
+        let _gate = self.volume_gate();
+        {
+            let mut st = self.lock();
+            if st.fixed_volume == on && (!on || (st.volume == 100 && !st.muted)) {
+                return;
+            }
+            st.fixed_volume = on;
+            if on {
+                st.volume = 100;
+                st.muted = false;
+            }
+        }
+        if on {
+            let p = self.player();
+            p.set_volume(100);
+            p.set_mute(false);
+        }
+        self.events.publish(CtlEvent::VolumeChanged);
+    }
+
+    pub fn volume_fixed(&self) -> bool {
+        self.lock().fixed_volume
     }
 
     /// ReplayGain mode and preamp; applies from the next loaded track.
@@ -1126,7 +1182,8 @@ impl Controller {
             return;
         };
         let items = self.new_items(s.queue);
-        {
+        let _gate = self.volume_gate();
+        let volume = {
             let mut st = self.lock();
             st.current = s.current.filter(|i| *i < items.len());
             st.dur_ms = st
@@ -1136,13 +1193,18 @@ impl Controller {
                 .unwrap_or(0);
             st.queue = items;
             st.pos_ms = s.pos_ms;
-            st.volume = s.volume.min(100);
+            // A saved lower volume does not come back while it is fixed.
+            if !st.fixed_volume {
+                st.volume = s.volume.min(100);
+            }
             st.shuffle = s.shuffle;
             st.repeat = s.repeat;
             st.context = s.context;
             st.queue_rev += 1;
-        }
-        self.player().set_volume(s.volume.min(100));
+            st.volume
+        };
+        self.player().set_volume(volume);
+        drop(_gate);
         *self.resume_at.lock().unwrap() = Some(s.pos_ms);
         self.events.publish(CtlEvent::QueueChanged);
         self.events.publish(CtlEvent::TrackChanged);
@@ -1903,6 +1965,72 @@ mod tests {
         // Sessions saved before these fields still load.
         let old: TrackInfo = serde_json::from_str(r#"{"uri":"plugin://d/t","title":"x"}"#).unwrap();
         assert_eq!((old.album_ref, old.artist_ref), (None, None));
+    }
+
+    fn vol(c: &Controller) -> (u32, bool) {
+        let st = c.lock();
+        (st.volume, st.muted)
+    }
+
+    #[test]
+    fn fixed_volume_holds_100_and_ignores_changes() {
+        let c = ctl();
+        c.set_volume(40);
+        c.set_muted(true);
+        assert_eq!(vol(&c), (40, true));
+        let events = c.subscribe();
+        c.set_fixed_volume(true);
+        assert!(c.volume_fixed());
+        assert_eq!(vol(&c), (100, false));
+        assert!(
+            events
+                .try_iter()
+                .any(|e| matches!(e, CtlEvent::VolumeChanged))
+        );
+        c.set_volume(10);
+        c.set_muted(true);
+        c.set_volume(0);
+        assert_eq!(vol(&c), (100, false));
+        // Ignored requests still announce the real value.
+        assert!(
+            events
+                .try_iter()
+                .any(|e| matches!(e, CtlEvent::VolumeChanged))
+        );
+        c.set_fixed_volume(false);
+        assert!(!c.volume_fixed());
+        assert_eq!(vol(&c), (100, false));
+        c.set_volume(25);
+        c.set_muted(true);
+        assert_eq!(vol(&c), (25, true));
+    }
+
+    #[test]
+    fn fixed_volume_blocks_session_restore_of_a_lower_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("session.json");
+        let c = ctl();
+        c.enable_session(p.clone(), false);
+        c.enqueue((1..=2).map(info).collect(), EnqueueAt::End);
+        c.set_volume(30);
+        c.save_session();
+
+        let locked = ctl();
+        locked.set_fixed_volume(true);
+        locked.enable_session(p.clone(), true);
+        assert_eq!(locked.lock().queue.len(), 2);
+        assert_eq!(vol(&locked), (100, false));
+
+        // Restored first, locked afterwards: the lock wins too.
+        let late = ctl();
+        late.enable_session(p.clone(), true);
+        assert_eq!(vol(&late).0, 30);
+        late.set_fixed_volume(true);
+        assert_eq!(vol(&late), (100, false));
+
+        let free = ctl();
+        free.enable_session(p, true);
+        assert_eq!(vol(&free).0, 30);
     }
 
     #[derive(Clone, Default)]

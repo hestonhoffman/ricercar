@@ -195,6 +195,52 @@ fn volume_flow() {
         &[("InstanceID", "0"), ("Channel", "Master")],
     );
     assert!(resp.contains("<CurrentVolume>55</CurrentVolume>"), "{resp}");
+
+    // Fixed volume: requests succeed, nothing changes, 100 is reported.
+    r._ctl.set_fixed_volume(true);
+    let resp = soap(
+        r.handle.port,
+        "/ctl/rcs",
+        ns,
+        "SetVolume",
+        &[
+            ("InstanceID", "0"),
+            ("Channel", "Master"),
+            ("DesiredVolume", "20"),
+        ],
+    );
+    assert!(resp.contains("200 OK") && !resp.contains("Fault"), "{resp}");
+    let resp = soap(
+        r.handle.port,
+        "/ctl/rcs",
+        ns,
+        "SetMute",
+        &[
+            ("InstanceID", "0"),
+            ("Channel", "Master"),
+            ("DesiredMute", "1"),
+        ],
+    );
+    assert!(resp.contains("200 OK") && !resp.contains("Fault"), "{resp}");
+    let resp = soap(
+        r.handle.port,
+        "/ctl/rcs",
+        ns,
+        "GetVolume",
+        &[("InstanceID", "0"), ("Channel", "Master")],
+    );
+    assert!(
+        resp.contains("<CurrentVolume>100</CurrentVolume>"),
+        "{resp}"
+    );
+    let resp = soap(
+        r.handle.port,
+        "/ctl/rcs",
+        ns,
+        "GetMute",
+        &[("InstanceID", "0"), ("Channel", "Master")],
+    );
+    assert!(resp.contains("<CurrentMute>0</CurrentMute>"), "{resp}");
 }
 
 #[test]

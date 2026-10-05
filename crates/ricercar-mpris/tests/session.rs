@@ -79,4 +79,41 @@ fn registration_and_props() {
     let meta: std::collections::HashMap<String, zbus::zvariant::OwnedValue> = v.try_into().unwrap();
     assert!(meta.contains_key("mpris:trackid"));
     assert!(meta.contains_key("xesam:url"));
+
+    // Volume (`ricercar-cli volume` goes through it), then fixed volume.
+    let set_volume = |v: f64| {
+        c.call_method(
+            Some("org.mpris.MediaPlayer2.ricercar"),
+            "/org/mpris/MediaPlayer2",
+            Some("org.freedesktop.DBus.Properties"),
+            "Set",
+            &(
+                "org.mpris.MediaPlayer2.Player",
+                "Volume",
+                zbus::zvariant::Value::from(v),
+            ),
+        )
+    };
+    let volume = || -> f64 {
+        let body = c
+            .call_method(
+                Some("org.mpris.MediaPlayer2.ricercar"),
+                "/org/mpris/MediaPlayer2",
+                Some("org.freedesktop.DBus.Properties"),
+                "Get",
+                &("org.mpris.MediaPlayer2.Player", "Volume"),
+            )
+            .unwrap();
+        let (v,): (zbus::zvariant::OwnedValue,) = body.body().deserialize().unwrap();
+        v.try_into().unwrap()
+    };
+    set_volume(0.3).unwrap();
+    assert_eq!(volume(), 0.3);
+    assert_eq!(ctl.lock().volume, 30);
+    ctl.set_fixed_volume(true);
+    assert_eq!(volume(), 1.0);
+    // Accepted without error, and ignored.
+    set_volume(0.2).unwrap();
+    assert_eq!(volume(), 1.0);
+    assert_eq!(ctl.lock().volume, 100);
 }

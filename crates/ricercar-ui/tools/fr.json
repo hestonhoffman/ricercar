@@ -422,5 +422,13 @@
 "Settings for {name}": "Réglages de {name}",
 "At least {n}": "Au moins {n}",
 "At most {n}": "Au plus {n}",
-"At most {n} characters": "Au plus {n} caractères"
+"At most {n} characters": "Au plus {n} caractères",
+"Fixed volume (bit-perfect)": "Volume fixe (bit-perfect)",
+"Volume stays at 100 %; changes from this app, phones and media keys are ignored. Use your amplifier's volume.": "Volume fixé à 100 % ; l'appli, les téléphones et les touches multimédias ne le changent plus. Réglez l'ampli.",
+"Volume fixed at 100 % (Settings → Audio output)": "Volume fixé à 100 % (Réglages → Sortie audio)",
+"Volume fixed at 100 %": "Volume fixé à 100 %",
+"Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume.": "Les échantillons arrivent intacts au périphérique : fréquence native, sans rééchantillonnage, sans mixeur, sans traitement du volume. Volume fixé à 100 % : réglez le volume sur votre amplificateur.",
+"Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback.": "Un maillon de la chaîne modifie les échantillons (ReplayGain ou périphérique partagé). Le volume est fixé à 100 % ; désactivez ReplayGain et choisissez un périphérique hw: pour une lecture bit-perfect.",
+"Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume.": "Chaque échantillon arrive au DAC exactement tel qu'il est dans le fichier. Volume fixé à 100 % : réglez le volume sur votre amplificateur.",
+"Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples.": "Volume fixé à 100 %. ReplayGain ou un périphérique partagé (non hw:) modifie les échantillons."
 }

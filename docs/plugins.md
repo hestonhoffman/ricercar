@@ -427,7 +427,9 @@ for plugins that expose ricercar to an external control protocol.
 - `player.pause`, `player.resume`, `player.stop`;
 - `player.seek {ms}`;
 - `player.next`, `player.previous`;
-- `player.set_volume {percent}`, `player.set_mute {on}`.
+- `player.set_volume {percent}`, `player.set_mute {on}`. Both succeed but
+  are ignored while the user has fixed the volume (`[audio] fixed_volume`):
+  the next `player.state` reports the real value, 100 and unmuted.
 
 **Host → plugin notifications:**
 - `player.state {status, item_ref?, pos_ms, dur_ms, volume, muted}`, sent on

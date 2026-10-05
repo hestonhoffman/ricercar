@@ -340,6 +340,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_preamp(cfg.audio.preamp_db);
     app.set_restore_session(cfg.audio.restore_session);
     app.set_continuous_playback(cfg.audio.continuous_playback);
+    app.set_fixed_volume(cfg.audio.fixed_volume);
     app.set_watch_library(cfg.library.watch);
     app.set_renderer_name(cfg.network.name.clone().into());
     app.set_renderer_enabled(cfg.network.renderer);
@@ -730,6 +731,7 @@ fn settings_changed(ui: &Rc<Ui>) {
         c.audio.preamp_db = preamp;
         c.audio.restore_session = app.get_restore_session();
         c.audio.continuous_playback = app.get_continuous_playback();
+        c.audio.fixed_volume = app.get_fixed_volume();
         c.library.watch = app.get_watch_library();
         let name = app.get_renderer_name().trim().to_string();
         if !name.is_empty() {

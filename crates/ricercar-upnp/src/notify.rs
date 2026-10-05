@@ -92,6 +92,7 @@ pub fn event_loop(r: Arc<Renderer>, rx: Receiver<Wake>, stop: Arc<AtomicBool>) {
         };
         let mut dirty: Vec<Svc> = Vec::new();
         let mut new_subs: Vec<(Svc, String)> = Vec::new();
+        let mut forced: Vec<Svc> = Vec::new();
         let mut queue_changed = false;
         let mut handle = |w: Wake, dirty: &mut Vec<Svc>| match w {
             Wake::Ctl(svcs, queue) => {
@@ -100,6 +101,10 @@ pub fn event_loop(r: Arc<Renderer>, rx: Receiver<Wake>, stop: Arc<AtomicBool>) {
             }
             Wake::Dirty => dirty.extend_from_slice(&Svc::ALL),
             Wake::NewSub(svc, sid) => new_subs.push((svc, sid)),
+            Wake::Resend(svcs) => {
+                forced.extend_from_slice(svcs);
+                dirty.extend_from_slice(svcs);
+            }
         };
         if let Some(w) = first {
             handle(w, &mut dirty);
@@ -128,12 +133,15 @@ pub fn event_loop(r: Arc<Renderer>, rx: Receiver<Wake>, stop: Arc<AtomicBool>) {
         for svc in dirty {
             let vars = r.vars(svc, &s);
             let prev = last.get(&svc);
+            let resend = forced.contains(&svc);
             let changed: Vars = vars
                 .iter()
                 .filter(|(k, v)| {
-                    prev.and_then(|p| p.iter().find(|(pk, _)| pk == k))
-                        .map(|(_, pv)| pv != v)
-                        .unwrap_or(true)
+                    resend
+                        || prev
+                            .and_then(|p| p.iter().find(|(pk, _)| pk == k))
+                            .map(|(_, pv)| pv != v)
+                            .unwrap_or(true)
                 })
                 .cloned()
                 .collect();

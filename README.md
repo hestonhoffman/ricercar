@@ -361,6 +361,10 @@ and nothing is muted, samples reach the kernel **untouched**:
 - a rate change between tracks drains and reopens the device; within one
   rate, gapless is sample-exact.
 
+With an amplifier that has its own volume knob, turn on **Fixed volume**
+(Settings → Audio output): the volume stays at 100 % and volume changes from
+the app, phones, media keys and plugins are ignored.
+
 The signal-path view marks each hop green (untouched) or amber (altered:
 software volume, ReplayGain, a shared device…). The pipeline tests compare
 decoded output **byte for byte** against ffmpeg references for every
@@ -394,6 +398,7 @@ replaygain = "off"         # off | track | album | auto
 preamp_db = 0.0
 restore_session = true
 continuous_playback = false  # more tracks from a plugin radio when the queue ends
+fixed_volume = false  # keep the volume at 100 %, ignore volume changes
 
 [library]
 roots = ["/home/me/Music", "/mnt/nas/flac"]

@@ -528,22 +528,26 @@ impl Renderer {
             "SetVolume" => match args.num::<u32>("Value") {
                 Some(v) if v <= 100 => {
                     self.ctl.set_volume(v);
+                    self.resync_volume();
                     ok(&[])
                 }
                 _ => Reply::Err(801, "Volume out of range"),
             },
             "VolumeInc" => {
                 self.ctl.set_volume((vol + 1).min(100));
+                self.resync_volume();
                 ok(&[])
             }
             "VolumeDec" => {
                 self.ctl.set_volume(vol.saturating_sub(1));
+                self.resync_volume();
                 ok(&[])
             }
             "Volume" => ok(&[("Value", &vol.to_string())]),
             "SetMute" => match args.bool("Value") {
                 Some(m) => {
                     self.ctl.set_muted(m);
+                    self.resync_volume();
                     ok(&[])
                 }
                 None => Reply::Err(402, "Invalid Args"),

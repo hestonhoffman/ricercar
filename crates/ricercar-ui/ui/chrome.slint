@@ -408,7 +408,9 @@ export component ChainPanel inherits Rectangle {
             }
         }
         Text {
-            text: App.bitperfect ? @tr("Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing.") : @tr("Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback.");
+            text: App.fixed-volume
+                ? (App.bitperfect ? @tr("Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume.") : @tr("Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback."))
+                : (App.bitperfect ? @tr("Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing.") : @tr("Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback."));
             wrap: word-wrap;
             font-size: Theme.fs-sm;
             color: Theme.text2;
@@ -416,20 +418,23 @@ export component ChainPanel inherits Rectangle {
     }
 }
 
+// Disabled, not hidden, while the volume is fixed (Settings → Audio output).
 component VolumeControl inherits HorizontalLayout {
     spacing: 4px;
     IconButton {
         y: (parent.height - self.height) / 2;
         icon: App.muted || App.volume == 0 ? Icons.volume-x : App.volume < 0.5 ? Icons.volume-1 : Icons.volume-2;
-        tooltip: @tr("Mute");
+        enabled: !App.fixed-volume;
+        tooltip: App.fixed-volume ? @tr("Volume fixed at 100 % (Settings → Audio output)") : @tr("Mute");
         clicked => { App.toggle-mute(); }
     }
     SeekBar {
         y: (parent.height - self.height) / 2;
         width: 96px;
-        label: @tr("Volume");
-        value: App.muted ? 0 : App.volume;
-        fill: App.volume < 1 ? Theme.warn : Theme.text2;
+        enabled: !App.fixed-volume;
+        label: App.fixed-volume ? @tr("Volume fixed at 100 % (Settings → Audio output)") : @tr("Volume");
+        value: App.fixed-volume ? 1 : App.muted ? 0 : App.volume;
+        fill: App.fixed-volume ? Theme.text3 : App.volume < 1 ? Theme.warn : Theme.text2;
         seek(v) => { App.set-volume(v); }
         moved(v) => { App.set-volume(v); }
     }

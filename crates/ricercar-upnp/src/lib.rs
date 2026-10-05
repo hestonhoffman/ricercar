@@ -174,6 +174,10 @@ pub(crate) enum Wake {
     Dirty,
     /// Send the initial event to a new subscriber.
     NewSub(Svc, String),
+    /// Send every variable of these services again, changed or not: a
+    /// request was ignored and control points must drop the value they
+    /// showed in anticipation (fixed volume).
+    Resend(&'static [Svc]),
 }
 
 /// OpenHome Info counters.
@@ -234,6 +238,15 @@ impl Renderer {
     pub fn wake(&self, w: Wake) {
         if let Some(tx) = self.wake.lock().unwrap().as_ref() {
             let _ = tx.send(w);
+        }
+    }
+
+    /// After a volume or mute request: while the volume is fixed the
+    /// controller ignored it, the request still succeeds and subscribers
+    /// get the real volume (100, unmuted) again.
+    pub(crate) fn resync_volume(&self) {
+        if self.ctl.volume_fixed() {
+            self.wake(Wake::Resend(&[Svc::Rcs, Svc::OhVolume]));
         }
     }
 

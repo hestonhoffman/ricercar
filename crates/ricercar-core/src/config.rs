@@ -61,6 +61,9 @@ pub struct AudioConfig {
     /// When the queue ends on a track of a plugin that declares `radio`,
     /// go on with tracks the plugin suggests (docs/plugins.md).
     pub continuous_playback: bool,
+    /// Keep the volume at 100 % and unmuted, and ignore every volume or
+    /// mute change (UI, network control points, MPRIS, plugins).
+    pub fixed_volume: bool,
 }
 
 impl Default for AudioConfig {
@@ -71,6 +74,7 @@ impl Default for AudioConfig {
             preamp_db: 0.0,
             restore_session: true,
             continuous_playback: false,
+            fixed_volume: false,
         }
     }
 }
@@ -347,13 +351,16 @@ mod tests {
         let mut c = Config::default();
         c.audio.device = "hw:1,0".into();
         c.library.roots.push("/music".into());
+        c.audio.fixed_volume = true;
         c.save(&p).unwrap();
+        assert!(text_of(&p).contains("fixed_volume = true"));
         assert_eq!(Config::load(&p), c);
 
         std::fs::write(&p, "[audio]\nreplaygain = \"album\"\n").unwrap();
         let c = Config::load(&p);
         assert_eq!(c.audio.replaygain, ReplayGain::Album);
         assert_eq!(c.audio.device, "default");
+        assert!(!c.audio.fixed_volume);
         assert_eq!(c.network.name, "ricercar");
     }
 
