@@ -240,6 +240,8 @@ pub struct CtlState {
     pub queue: Vec<QueueItem>,
     pub current: Option<usize>,
     pub shuffle: bool,
+    /// Queue ids in their unshuffled order, restored when shuffle goes off.
+    pub natural: Vec<u64>,
     pub repeat: Repeat,
     pub origin: Origin,
     pub context: PlayContext,
@@ -290,6 +292,42 @@ impl CtlState {
     pub fn has_prev(&self) -> bool {
         self.current.is_some_and(|i| i > 0) || self.repeat == Repeat::All
     }
+
+    /// Put `ids` into the natural order right after `anchor` (at the front
+    /// when `None`, at the end when the anchor is not there).
+    fn natural_insert(&mut self, anchor: Option<u64>, ids: &[u64]) {
+        let pos = match anchor {
+            None => 0,
+            Some(a) => self
+                .natural
+                .iter()
+                .position(|id| *id == a)
+                .map_or(self.natural.len(), |i| i + 1),
+        };
+        self.natural.splice(pos..pos, ids.iter().copied());
+    }
+
+    /// Drop the ids that left the queue from the natural order.
+    fn natural_retain(&mut self) {
+        let queued: HashSet<u64> = self.queue.iter().map(|q| q.id).collect();
+        self.natural.retain(|id| queued.contains(id));
+    }
+
+    /// Reorder the queue to the natural order; ids it does not know keep
+    /// their relative place at the end. The current item stays current.
+    fn restore_natural(&mut self) {
+        let cur_id = self.current_item().map(|q| q.id);
+        let rank: HashMap<u64, usize> = self
+            .natural
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect();
+        self.queue
+            .sort_by_key(|q| rank.get(&q.id).copied().unwrap_or(usize::MAX));
+        self.natural = self.queue.iter().map(|q| q.id).collect();
+        self.current = cur_id.and_then(|c| self.queue.iter().position(|q| q.id == c));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +340,9 @@ struct Session {
     repeat: Repeat,
     #[serde(default)]
     context: PlayContext,
+    /// Unshuffled order as indexes into `queue`.
+    #[serde(default)]
+    natural: Option<Vec<usize>>,
 }
 
 #[derive(Default)]
@@ -402,6 +443,7 @@ impl Controller {
                 queue: Vec::new(),
                 current: None,
                 shuffle: false,
+                natural: Vec::new(),
                 repeat: Repeat::Off,
                 origin: Origin::Local,
                 context: PlayContext::None,
@@ -663,6 +705,18 @@ impl Controller {
 
     /// Replace the queue and start playing `start`.
     pub fn play_tracks(&self, infos: Vec<TrackInfo>, start: usize, ctx: PlayContext) {
+        self.play_tracks_in(infos, start, ctx, None);
+    }
+
+    /// `play_tracks`; `order` lists the unshuffled order as indexes into
+    /// `infos` when they come already shuffled.
+    fn play_tracks_in(
+        &self,
+        infos: Vec<TrackInfo>,
+        start: usize,
+        ctx: PlayContext,
+        order: Option<Vec<usize>>,
+    ) {
         if infos.is_empty() {
             return;
         }
@@ -670,6 +724,14 @@ impl Controller {
         {
             let mut st = self.lock();
             let start = start.min(items.len() - 1);
+            st.natural = match order {
+                Some(o) => o
+                    .iter()
+                    .filter_map(|i| items.get(*i))
+                    .map(|q| q.id)
+                    .collect(),
+                None => items.iter().map(|q| q.id).collect(),
+            };
             st.queue = items;
             st.current = Some(start);
             if st.shuffle {
@@ -712,9 +774,17 @@ impl Controller {
     }
 
     /// Replace the queue with a shuffled copy and play it.
-    pub fn play_shuffled(&self, mut infos: Vec<TrackInfo>, ctx: PlayContext) {
-        shuffle_in_place(&mut infos);
-        self.play_tracks(infos, 0, ctx);
+    pub fn play_shuffled(&self, infos: Vec<TrackInfo>, ctx: PlayContext) {
+        let mut order: Vec<usize> = (0..infos.len()).collect();
+        shuffle_in_place(&mut order);
+        let mut slots: Vec<Option<TrackInfo>> = infos.into_iter().map(Some).collect();
+        let shuffled: Vec<TrackInfo> = order.iter().filter_map(|i| slots[*i].take()).collect();
+        // Turning shuffle off later brings back the order as given.
+        let mut natural = vec![0; order.len()];
+        for (pos, orig) in order.iter().enumerate() {
+            natural[*orig] = pos;
+        }
+        self.play_tracks_in(shuffled, 0, ctx, Some(natural));
     }
 
     pub fn play_library_tracks(&self, tracks: &[Track], start: usize, ctx: PlayContext) {
@@ -729,9 +799,17 @@ impl Controller {
         let start_now = {
             let mut st = self.lock();
             let was_empty = st.queue.is_empty();
+            let ids: Vec<u64> = items.iter().map(|q| q.id).collect();
             let pos = match (at, st.current) {
-                (EnqueueAt::Next, Some(i)) => (i + 1).min(st.queue.len()),
-                _ => st.queue.len(),
+                (EnqueueAt::Next, Some(i)) if i < st.queue.len() => {
+                    let cur = st.queue[i].id;
+                    st.natural_insert(Some(cur), &ids);
+                    i + 1
+                }
+                _ => {
+                    st.natural.extend(&ids);
+                    st.queue.len()
+                }
             };
             st.queue.splice(pos..pos, items);
             st.queue_rev += 1;
@@ -770,6 +848,7 @@ impl Controller {
             }
             let n = items.len();
             st.queue.splice(pos..pos, items);
+            st.natural_insert((after_id != 0).then_some(after_id), &ids);
             if let Some(cur) = st.current
                 && pos <= cur
             {
@@ -809,6 +888,7 @@ impl Controller {
             let playing = st.status != TransportStatus::Stopped;
             let cur_idx = st.current.unwrap_or(0);
             st.queue.retain(|q| !ids.contains(&q.id));
+            st.natural_retain();
             st.queue_rev += 1;
             match cur_id {
                 Some(cid) if ids.contains(&cid) => {
@@ -846,7 +926,14 @@ impl Controller {
             }
             let cur_id = st.current_item().map(|q| q.id);
             let item = st.queue.remove(from);
+            let id = item.id;
             st.queue.insert(to, item);
+            // Unshuffled, the natural order follows the move.
+            if !st.shuffle {
+                let before = to.checked_sub(1).map(|i| st.queue[i].id);
+                st.natural.retain(|n| *n != id);
+                st.natural_insert(before, &[id]);
+            }
             st.current = cur_id.and_then(|c| st.queue.iter().position(|q| q.id == c));
             st.queue_rev += 1;
         }
@@ -860,6 +947,7 @@ impl Controller {
             let mut st = self.lock();
             let keep = st.current.map(|i| i + 1).unwrap_or(0);
             st.queue.truncate(keep);
+            st.natural_retain();
             st.queue_rev += 1;
         }
         self.events.publish(CtlEvent::QueueChanged);
@@ -871,6 +959,7 @@ impl Controller {
         {
             let mut st = self.lock();
             st.queue.clear();
+            st.natural.clear();
             st.current = None;
             st.context = PlayContext::None;
             st.queue_rev += 1;
@@ -896,16 +985,8 @@ impl Controller {
                 if from < st.queue.len() {
                     shuffle_in_place(&mut st.queue[from..]);
                 }
-            } else if st.context != PlayContext::None && st.origin == Origin::Local {
-                // Restore a natural order: album/disc/track, else keep as is.
-                let cur_id = st.current_item().map(|q| q.id);
-                let from = st.current.map(|i| i + 1).unwrap_or(0);
-                let mut rest: Vec<QueueItem> = st.queue.drain(from..).collect();
-                rest.sort_by(|a, b| {
-                    (&a.info.album_id, a.info.track_no).cmp(&(&b.info.album_id, b.info.track_no))
-                });
-                st.queue.extend(rest);
-                st.current = cur_id.and_then(|c| st.queue.iter().position(|q| q.id == c));
+            } else {
+                st.restore_natural();
             }
             st.queue_rev += 1;
         }
@@ -1118,6 +1199,7 @@ impl Controller {
         let items = self.new_items(vec![info]);
         {
             let mut st = self.lock();
+            st.natural = items.iter().map(|q| q.id).collect();
             st.queue = items;
             st.current = Some(0);
             st.origin = Origin::Remote;
@@ -1145,6 +1227,12 @@ impl Controller {
                 info.uri = uri.into();
                 let items = self.new_items(vec![info]);
                 st.queue.extend(items);
+            }
+            st.natural_retain();
+            if let Some(last) = st.queue.last().map(|q| q.id)
+                && !st.natural.contains(&last)
+            {
+                st.natural.push(last);
             }
             st.queue_rev += 1;
         }
@@ -1191,6 +1279,24 @@ impl Controller {
                 .and_then(|i| items.get(i))
                 .map(|q| q.info.duration_ms)
                 .unwrap_or(0);
+            st.natural = match &s.natural {
+                Some(order) => order
+                    .iter()
+                    .filter_map(|i| items.get(*i))
+                    .map(|q| q.id)
+                    .collect(),
+                // Older sessions: album/track order after the current item.
+                None if s.shuffle => {
+                    let from = st.current.map(|i| i + 1).unwrap_or(0).min(items.len());
+                    let mut rest: Vec<&QueueItem> = items[from..].iter().collect();
+                    rest.sort_by(|a, b| {
+                        (&a.info.album_id, a.info.track_no)
+                            .cmp(&(&b.info.album_id, b.info.track_no))
+                    });
+                    items[..from].iter().chain(rest).map(|q| q.id).collect()
+                }
+                None => items.iter().map(|q| q.id).collect(),
+            };
             st.queue = items;
             st.pos_ms = s.pos_ms;
             // A saved lower volume does not come back while it is fixed.
@@ -1247,6 +1353,18 @@ fn save_session_to(state: &Mutex<CtlState>, path: &std::path::Path) {
             shuffle: st.shuffle,
             repeat: st.repeat,
             context: st.context.clone(),
+            natural: Some({
+                let index: HashMap<u64, usize> = st
+                    .queue
+                    .iter()
+                    .enumerate()
+                    .map(|(i, q)| (q.id, i))
+                    .collect();
+                st.natural
+                    .iter()
+                    .filter_map(|id| index.get(id).copied())
+                    .collect()
+            }),
         }
     };
     if let Ok(json) = serde_json::to_vec(&s)
@@ -1556,7 +1674,9 @@ impl Bridge {
                 return;
             }
             let at = st.queue.len();
-            st.queue.extend(new_items(&self.next_id, infos));
+            let items = new_items(&self.next_id, infos);
+            st.natural.extend(items.iter().map(|q| q.id));
+            st.queue.extend(items);
             st.queue_rev += 1;
             // The seed ended while the plugin was answering.
             let ended = st.status == TransportStatus::Stopped;
@@ -1851,11 +1971,11 @@ mod tests {
 
     #[test]
     fn queue_mutations_keep_current() {
-        let c = ctl();
-        c.enqueue((1..=3).map(info).collect(), EnqueueAt::End);
+        let c = stalled();
+        c.enqueue((1..=3).map(album).collect(), EnqueueAt::End);
         assert_eq!(c.lock().current, Some(0));
         c.lock().current = Some(1);
-        c.enqueue(vec![info(9)], EnqueueAt::Next);
+        c.enqueue(vec![album(9)], EnqueueAt::Next);
         assert_eq!(titles(&c), ["t1", "t2", "t9", "t3"]);
         c.move_item(3, 0);
         assert_eq!(titles(&c), ["t3", "t1", "t2", "t9"]);
@@ -1871,8 +1991,8 @@ mod tests {
 
     #[test]
     fn shuffle_keeps_current_first_and_restores_order() {
-        let c = ctl();
-        c.enqueue((1..=30).map(info).collect(), EnqueueAt::End);
+        let c = stalled();
+        c.enqueue((1..=30).map(album).collect(), EnqueueAt::End);
         c.lock().context = PlayContext::Album("a".into());
         c.lock().current = Some(4);
         c.set_shuffle(true);
@@ -1887,6 +2007,197 @@ mod tests {
             titles(&c),
             (1..=30).map(|n| format!("t{n}")).collect::<Vec<_>>()
         );
+        assert_eq!(c.lock().current, Some(4));
+    }
+
+    /// Never answers: plugin items stay loading, so nothing fails and
+    /// skips ahead while a test looks at the queue.
+    struct Stalled;
+
+    impl Resolver for Stalled {
+        fn resolve(&self, _uri: &str, _p: Purpose) -> Result<Resolved, PluginError> {
+            std::thread::sleep(Duration::from_secs(600));
+            Err(PluginError::NotRunning)
+        }
+        fn plugin_name(&self, _uri: &str) -> Option<String> {
+            None
+        }
+    }
+
+    fn stalled() -> Controller {
+        let c = ctl();
+        c.set_resolver(Arc::new(Stalled));
+        c
+    }
+
+    /// A plugin track: no album id, no track number.
+    fn plug(title: &str) -> TrackInfo {
+        TrackInfo {
+            uri: format!("plugin://d/{title}"),
+            title: title.into(),
+            ..Default::default()
+        }
+    }
+
+    fn album(n: u32) -> TrackInfo {
+        TrackInfo {
+            uri: format!("plugin://d/{n}"),
+            ..info(n)
+        }
+    }
+
+    fn names(r: std::ops::RangeInclusive<u32>) -> Vec<String> {
+        r.map(|n| format!("t{n}")).collect()
+    }
+
+    fn current_title(c: &Controller) -> String {
+        c.lock().current_item().unwrap().info.title.clone()
+    }
+
+    #[test]
+    fn album_started_shuffled_unshuffles_to_album_order() {
+        let c = stalled();
+        c.set_shuffle(true);
+        c.play_tracks(
+            (1..=12).map(album).collect(),
+            4,
+            PlayContext::Album("a".into()),
+        );
+        assert_eq!(c.lock().current, Some(0));
+        assert_eq!(current_title(&c), "t5");
+        c.set_shuffle(false);
+        assert_eq!(titles(&c), names(1..=12));
+        assert_eq!(c.lock().current, Some(4));
+        assert_eq!(current_title(&c), "t5");
+    }
+
+    #[test]
+    fn playlist_and_plugin_order_restored_exactly() {
+        let order = [
+            "zeta", "alpha", "mu", "beta", "omega", "kappa", "delta", "gamma",
+        ];
+        let tracks = || order.iter().map(|t| plug(t)).collect::<Vec<_>>();
+        let c = stalled();
+        c.play_tracks(tracks(), 2, PlayContext::Playlist(3));
+        c.set_shuffle(true);
+        c.set_shuffle(false);
+        assert_eq!(titles(&c), order);
+        assert_eq!(current_title(&c), "mu");
+        // Started shuffled, from a plugin, without a context.
+        c.set_shuffle(true);
+        c.play_from_plugin("d", tracks(), 5);
+        c.set_shuffle(false);
+        assert_eq!(titles(&c), order);
+        assert_eq!(c.lock().current, Some(5));
+        // Shuffle play of a list, then shuffle on and off.
+        c.play_shuffled(tracks(), PlayContext::Playlist(3));
+        let first = current_title(&c);
+        c.set_shuffle(true);
+        c.set_shuffle(false);
+        assert_eq!(titles(&c), order);
+        assert_eq!(current_title(&c), first);
+    }
+
+    #[test]
+    fn queue_edits_while_shuffled_land_in_natural_place() {
+        let edit = |c: &Controller| {
+            c.enqueue(vec![plug("next")], EnqueueAt::Next);
+            c.enqueue(vec![plug("end")], EnqueueAt::End);
+            let t3 = c
+                .lock()
+                .queue
+                .iter()
+                .find(|q| q.info.title == "t3")
+                .unwrap()
+                .id;
+            c.insert_after(t3, vec![plug("after3")]).unwrap();
+            let gone: Vec<u64> = c
+                .lock()
+                .queue
+                .iter()
+                .filter(|q| q.info.title == "t5" || q.info.title == "t6")
+                .map(|q| q.id)
+                .collect();
+            c.remove_ids(&gone);
+        };
+        let plain = stalled();
+        plain.play_tracks(
+            (1..=8).map(album).collect(),
+            1,
+            PlayContext::Album("a".into()),
+        );
+        edit(&plain);
+        let want = titles(&plain);
+        assert_eq!(
+            want,
+            ["t1", "t2", "next", "t3", "after3", "t4", "t7", "t8", "end"]
+        );
+        let c = stalled();
+        c.play_tracks(
+            (1..=8).map(album).collect(),
+            1,
+            PlayContext::Album("a".into()),
+        );
+        c.set_shuffle(true);
+        edit(&c);
+        c.set_shuffle(false);
+        assert_eq!(titles(&c), want);
+        assert_eq!(current_title(&c), "t2");
+        assert_eq!(c.lock().current, Some(1));
+    }
+
+    #[test]
+    fn moves_follow_natural_order_only_unshuffled() {
+        let c = stalled();
+        c.play_tracks(
+            (1..=6).map(album).collect(),
+            0,
+            PlayContext::Album("a".into()),
+        );
+        c.move_item(5, 1);
+        c.move_item(2, 4);
+        let moved = titles(&c);
+        assert_eq!(moved, ["t1", "t6", "t3", "t4", "t2", "t5"]);
+        c.set_shuffle(true);
+        c.move_item(5, 1);
+        c.set_shuffle(false);
+        assert_eq!(titles(&c), moved);
+        assert_eq!(current_title(&c), "t1");
+    }
+
+    #[test]
+    fn session_keeps_natural_order_while_shuffled() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("session.json");
+        let c = stalled();
+        c.enable_session(p.clone(), false);
+        c.set_shuffle(true);
+        c.play_tracks(
+            (1..=10).map(album).collect(),
+            3,
+            PlayContext::Album("a".into()),
+        );
+        c.save_session();
+        let c2 = stalled();
+        c2.enable_session(p.clone(), true);
+        assert!(c2.lock().shuffle);
+        assert_eq!(current_title(&c2), "t4");
+        c2.set_shuffle(false);
+        assert_eq!(titles(&c2), names(1..=10));
+        assert_eq!(c2.lock().current, Some(3));
+        // Sessions saved without it: album/track order after the current item.
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("natural");
+        std::fs::write(&p, v.to_string()).unwrap();
+        let c3 = stalled();
+        c3.enable_session(p, true);
+        c3.set_shuffle(false);
+        let t = titles(&c3);
+        assert_eq!(t[0], "t4");
+        let mut rest = names(1..=10);
+        rest.retain(|n| n != "t4");
+        assert_eq!(&t[1..], rest);
     }
 
     #[test]
