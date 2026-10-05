@@ -722,7 +722,7 @@ Thanks to the QBZ project for showing what a Linux hi-fi player can be.
 
 ## 📄 License
 
-[MIT](LICENSE) © ricercar contributors. See [AUTHORS](AUTHORS).
+[MIT](LICENSE) © ricercar contributors.
 
 <sub>ricercar is an independent open-source project. It is **not affiliated
 with, endorsed by, or connected to** the record label *Ricercar* (Outhere)
