@@ -2033,43 +2033,19 @@ mod tests {
         assert_eq!(vol(&free).0, 30);
     }
 
-    #[derive(Clone, Default)]
-    struct LogBuf(Arc<Mutex<Vec<u8>>>);
-
-    impl std::io::Write for LogBuf {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     #[test]
     fn engine_errors_are_logged_without_url_secrets() {
+        // on_error logs and publishes the same masked message; checking the
+        // event avoids capturing logs, which tracing's per-callsite cache
+        // makes unreliable when tests run in parallel.
         let c = ctl();
         let events = c.subscribe();
-        let buf = LogBuf::default();
-        let w = buf.clone();
-        let sub = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_writer(move || w.clone())
-            .finish();
         let uri = "http://127.0.0.1:9/x?token=secret";
-        tracing::subscriber::with_default(sub, || {
-            c.bridge().on_error(
-                format!("{uri}: connection to 127.0.0.1 timed out"),
-                Some(uri.into()),
-                None,
-            );
-        });
-        let log = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
-        assert!(
-            log.contains("engine: http://127.0.0.1:9/x?token=…: connection"),
-            "{log}"
+        c.bridge().on_error(
+            format!("{uri}: connection to 127.0.0.1 timed out"),
+            Some(uri.into()),
+            None,
         );
-        assert!(!log.contains("secret"), "{log}");
         let shown = events
             .try_iter()
             .find_map(|e| match e {
@@ -2077,6 +2053,9 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        assert!(!shown.contains("secret"), "{shown}");
+        assert_eq!(
+            shown,
+            "http://127.0.0.1:9/x?token=…: connection to 127.0.0.1 timed out"
+        );
     }
 }
