@@ -623,8 +623,11 @@ export component TextField inherits Rectangle {
             size: 16px;
             tint: input.has-focus ? Theme.text : Theme.text3;
         }
+        // Long text stays inside the field: clipped at its edges, and while
+        // typing the end (where the cursor usually is) is kept in view.
         Rectangle {
             horizontal-stretch: 1;
+            clip: true;
             if root.text == "": Text {
                 x: 0;
                 width: 100%;
@@ -635,7 +638,8 @@ export component TextField inherits Rectangle {
                 overflow: elide;
             }
             input := TextInput {
-                width: 100%;
+                width: max(parent.width, self.preferred-width + 2px);
+                x: self.has-focus ? min(0px, parent.width - self.width) : 0px;
                 text <=> root.text;
                 color: Theme.text;
                 font-size: Theme.fs-base;
