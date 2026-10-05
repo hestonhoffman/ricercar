@@ -430,5 +430,11 @@
 "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume.": "Die Samples erreichen das Gerät unverändert: native Abtastrate, kein Resampling, kein Mixer, keine Lautstärkeregelung. Lautstärke fest auf 100 %: Regle die Lautstärke am Verstärker.",
 "Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback.": "Etwas in der Kette verändert die Samples (ReplayGain oder ein Mixer-Gerät). Die Lautstärke ist fest auf 100 %; schalte ReplayGain aus und wähle ein hw:-Gerät für Bit-perfect-Wiedergabe.",
 "Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume.": "Jedes Sample erreicht den DAC genau so, wie es in der Datei steht. Lautstärke fest auf 100 %: Regle die Lautstärke am Verstärker.",
-"Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples.": "Lautstärke fest auf 100 %. ReplayGain oder ein gemeinsam genutztes Gerät (nicht hw:) verändert die Samples."
+"Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples.": "Lautstärke fest auf 100 %. ReplayGain oder ein gemeinsam genutztes Gerät (nicht hw:) verändert die Samples.",
+"Bluetooth device": "Bluetooth-Gerät",
+"{name} (not connected)": "{name} (nicht verbunden)",
+"{output} · default output; {device} not connected": "{output} · Standardausgabe; {device} nicht verbunden",
+"PipeWire default output": "PipeWire-Standardausgabe",
+"PipeWire default output; {device} not connected": "PipeWire-Standardausgabe; {device} nicht verbunden",
+"NOT CONNECTED": "NICHT VERBUNDEN"
 }

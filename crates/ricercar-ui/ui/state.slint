@@ -101,6 +101,8 @@ export struct DeviceRow {
     hardware: bool,
     // a system mixer sits in the path (default / pipewire / pulse)
     shared: bool,
+    // the chosen PipeWire output is not connected right now
+    absent: bool,
     selected: bool,
     // capabilities panel (hw: devices)
     expanded: bool,

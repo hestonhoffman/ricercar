@@ -9,6 +9,7 @@ mod diag;
 mod extras;
 mod images;
 mod merge;
+mod outputs;
 mod player;
 mod plugin_favs;
 mod plugin_menu;

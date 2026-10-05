@@ -351,6 +351,10 @@ msgid "SHARED"
 msgstr "CONDIVISO"
 
 msgctxt "SettingsPage"
+msgid "NOT CONNECTED"
+msgstr "NON CONNESSO"
+
+msgctxt "SettingsPage"
 msgid "Hide capabilities"
 msgstr "Nascondi capacità"
 

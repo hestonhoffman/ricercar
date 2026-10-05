@@ -201,19 +201,53 @@ pub fn list_devices() -> Vec<DeviceInfo> {
 /// PipeWire outputs that are not ALSA cards (Bluetooth headsets and
 /// speakers, network sinks…), reached through ALSA's `pipewire` plugin.
 fn pipewire_sinks() -> Vec<DeviceInfo> {
+    pactl(&["-f", "json", "list", "sinks"])
+        .map(|out| parse_pipewire_sinks(&out))
+        .unwrap_or_default()
+}
+
+/// Run `pactl` and return what it printed, when it succeeded.
+fn pactl(args: &[&str]) -> Option<String> {
     std::process::Command::new("pactl")
-        .args(["-f", "json", "list", "sinks"])
+        .args(args)
         .stderr(std::process::Stdio::null())
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| parse_pipewire_sinks(&String::from_utf8_lossy(&o.stdout)))
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+/// Every sink the sound server has right now (ALSA cards included), as
+/// `(node name, description)`. Empty without PipeWire/PulseAudio.
+pub fn pipewire_sink_names() -> Vec<(String, String)> {
+    pactl(&["-f", "json", "list", "sinks"])
+        .map(|out| parse_sink_names(&out))
         .unwrap_or_default()
 }
 
-/// `pactl -f json list sinks` → `pipewire:NODE="<name>"` devices. Sinks of
-/// ALSA cards are left out: their `hw:` device plays them bit-perfect.
-pub fn parse_pipewire_sinks(json: &str) -> Vec<DeviceInfo> {
+/// The sink PipeWire plays to when no node is given (or the given one is
+/// gone): `pactl get-default-sink`. Runs a process: keep it off the UI thread.
+pub fn pipewire_default_sink() -> Option<String> {
+    pactl(&["get-default-sink"]).and_then(|out| parse_default_sink(&out))
+}
+
+/// `pactl get-default-sink` output → the node name.
+pub fn parse_default_sink(out: &str) -> Option<String> {
+    let name = out.lines().next()?.trim();
+    (!name.is_empty() && !name.contains(char::is_whitespace) && !name.contains('"'))
+        .then(|| name.to_string())
+}
+
+/// The node inside a `pipewire:NODE="<name>"` device name.
+pub fn pipewire_node(device: &str) -> Option<&str> {
+    device
+        .strip_prefix("pipewire:NODE=")
+        .map(|n| n.trim_matches('"'))
+        .filter(|n| !n.is_empty())
+}
+
+/// `pactl -f json list sinks` → `(node name, description)` of every sink.
+pub fn parse_sink_names(json: &str) -> Vec<(String, String)> {
     let Ok(serde_json::Value::Array(sinks)) = serde_json::from_str(json) else {
         return Vec::new();
     };
@@ -221,14 +255,29 @@ pub fn parse_pipewire_sinks(json: &str) -> Vec<DeviceInfo> {
         .iter()
         .filter_map(|s| {
             let name = s.get("name")?.as_str()?;
-            // Quotes would break the ALSA argument.
-            if name.starts_with("alsa_output.") || name.contains('"') || name.is_empty() {
+            if name.is_empty() {
                 return None;
             }
             let desc = s
                 .get("description")
                 .and_then(|d| d.as_str())
+                .filter(|d| !d.is_empty())
                 .unwrap_or(name);
+            Some((name.to_string(), desc.to_string()))
+        })
+        .collect()
+}
+
+/// `pactl -f json list sinks` → `pipewire:NODE="<name>"` devices. Sinks of
+/// ALSA cards are left out: their `hw:` device plays them bit-perfect.
+pub fn parse_pipewire_sinks(json: &str) -> Vec<DeviceInfo> {
+    parse_sink_names(json)
+        .into_iter()
+        .filter_map(|(name, desc)| {
+            // Quotes would break the ALSA argument.
+            if name.starts_with("alsa_output.") || name.contains('"') {
+                return None;
+            }
             let via = if name.starts_with("bluez_output.") {
                 "Bluetooth"
             } else {
@@ -401,6 +450,48 @@ mod tests {
         assert_eq!(l[0].description, "WH-1000XM4 (Bluetooth, not bit-perfect)");
         assert_eq!(l[0].kind, DeviceKind::Virtual);
         assert!(parse_pipewire_sinks("not json").is_empty());
+        // Every sink, ALSA cards included, for readable names.
+        let all = parse_sink_names(json);
+        assert_eq!(all.len(), 4);
+        assert_eq!(
+            all[0],
+            (
+                "alsa_output.pci-0000_e3_00.6.HiFi__Speaker__sink".to_string(),
+                "Speaker".to_string()
+            )
+        );
+        let no_desc = parse_sink_names(r#"[{"name":"tunnel.x"},{"name":""}]"#);
+        assert_eq!(no_desc, [("tunnel.x".to_string(), "tunnel.x".to_string())]);
+    }
+
+    #[test]
+    fn default_sink_output() {
+        assert_eq!(
+            parse_default_sink("bluez_output.00_11_22_33_44_55.1\n").as_deref(),
+            Some("bluez_output.00_11_22_33_44_55.1")
+        );
+        assert_eq!(
+            parse_default_sink("  tunnel.office  ").as_deref(),
+            Some("tunnel.office")
+        );
+        assert_eq!(parse_default_sink(""), None);
+        assert_eq!(parse_default_sink("\n"), None);
+        assert_eq!(parse_default_sink("bad \"name\""), None);
+    }
+
+    #[test]
+    fn pipewire_node_names() {
+        assert_eq!(
+            pipewire_node("pipewire:NODE=\"bluez_output.00_11_22_33_44_55.1\""),
+            Some("bluez_output.00_11_22_33_44_55.1")
+        );
+        assert_eq!(
+            pipewire_node("pipewire:NODE=tunnel.office"),
+            Some("tunnel.office")
+        );
+        assert_eq!(pipewire_node("pipewire:NODE=\"\""), None);
+        assert_eq!(pipewire_node("pipewire"), None);
+        assert_eq!(pipewire_node("hw:1,0"), None);
     }
 
     #[test]

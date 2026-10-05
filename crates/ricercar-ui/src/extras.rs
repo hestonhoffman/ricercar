@@ -540,7 +540,17 @@ pub fn refresh_devices(ui: &Ui) {
     let current = ui.ctx.ctl.device_name();
     let cache = ui.saved_state.borrow().dac_caps.clone();
     let hist = rate_histogram(ui);
-    let mut rows: Vec<DeviceRow> = ricercar_audio::device::list_devices()
+    let devices = ricercar_audio::device::list_devices();
+    // Keep the names of PipeWire outputs for when they are not connected.
+    let listed: Vec<(String, String)> = devices
+        .iter()
+        .filter_map(|d| {
+            let node = ricercar_audio::device::pipewire_node(&d.name)?;
+            Some((node.to_string(), d.description.clone()))
+        })
+        .collect();
+    crate::outputs::remember(ui, &listed);
+    let mut rows: Vec<DeviceRow> = devices
         .into_iter()
         .filter(|d| d.kind != ricercar_audio::DeviceKind::Null)
         .map(|d| {
@@ -571,6 +581,7 @@ pub fn refresh_devices(ui: &Ui) {
                 .unwrap_or_default();
             DeviceRow {
                 hardware,
+                absent: false,
                 shared: d.kind == ricercar_audio::DeviceKind::Virtual,
                 selected: d.name == current,
                 desc: d
@@ -594,13 +605,20 @@ pub fn refresh_devices(ui: &Ui) {
         .collect();
     if !rows.iter().any(|r| r.selected) {
         let null = current == "null";
+        // A PipeWire output that is not connected now: its remembered name.
+        let node = ricercar_audio::device::pipewire_node(&current);
+        let absent = node.map(|n| {
+            let saved = ui.saved_state.borrow();
+            crate::outputs::absent_name(n, saved.device_name(n))
+        });
         rows.push(DeviceRow {
             desc: if null {
                 t("Null sink").into()
             } else {
-                current.clone()
+                absent.clone().unwrap_or_else(|| current.clone())
             }
             .into(),
+            absent: absent.is_some(),
             name: if null {
                 t("Discards audio (testing)").into()
             } else {
@@ -867,10 +885,23 @@ pub fn wire(ui: &Rc<Ui>) {
     app.on_select_device(|name| {
         with_ui(|ui| {
             let name = name.to_string();
+            let desc = ui
+                .app()
+                .get_devices()
+                .iter()
+                .find(|d| d.name == name.as_str())
+                .map(|d| d.desc.to_string());
+            if let Some(desc) = &desc {
+                crate::outputs::remember_picked(ui, &name, desc);
+            }
             ui.ctx.update_config(|c| c.audio.device = name.clone());
             crate::plugins::push_output(ui);
             refresh_devices(ui);
-            ui.toast(format!("{}: {name}", t("Output device")), false);
+            let shown = match (&desc, ricercar_audio::device::pipewire_node(&name)) {
+                (Some(desc), Some(_)) => crate::outputs::readable(desc).to_string(),
+                _ => name,
+            };
+            ui.toast(format!("{}: {shown}", t("Output device")), false);
         })
     });
     app.on_select_net_iface(|i| {

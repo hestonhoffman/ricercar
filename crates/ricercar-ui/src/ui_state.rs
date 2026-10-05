@@ -33,7 +33,13 @@ pub struct UiState {
     pub recent_searches: Vec<String>,
     /// Last known capabilities of each hw: device.
     pub dac_caps: crate::dac::CapsCache,
+    /// Readable names of PipeWire outputs seen before (node name, name),
+    /// most recent first: a device that is not connected keeps its name.
+    pub device_names: Vec<(String, String)>,
 }
+
+/// How many PipeWire output names are remembered.
+pub const DEVICE_NAMES_MAX: usize = 50;
 
 impl Default for UiState {
     fn default() -> Self {
@@ -47,6 +53,7 @@ impl Default for UiState {
             queue_open: false,
             recent_searches: Vec::new(),
             dac_caps: Default::default(),
+            device_names: Vec::new(),
         }
     }
 }
@@ -71,6 +78,39 @@ impl UiState {
 
     pub fn page(&self) -> Page {
         page_from_name(&self.page).unwrap_or(Page::Home)
+    }
+
+    /// The readable name remembered for a PipeWire node.
+    pub fn device_name(&self, node: &str) -> Option<&str> {
+        self.device_names
+            .iter()
+            .find(|(n, _)| n == node)
+            .map(|(_, name)| name.as_str())
+    }
+
+    /// Remember a node's readable name. `recent` moves it to the front (the
+    /// user picked it); otherwise a known node keeps its place. Returns
+    /// whether anything changed.
+    pub fn remember_device(&mut self, node: &str, name: &str, recent: bool) -> bool {
+        if node.is_empty() || name.is_empty() {
+            return false;
+        }
+        let pos = self.device_names.iter().position(|(n, _)| n == node);
+        match pos {
+            Some(i) if self.device_names[i].1 == name && (!recent || i == 0) => return false,
+            Some(i) if !recent => {
+                self.device_names[i].1 = name.to_string();
+                return true;
+            }
+            Some(i) => {
+                self.device_names.remove(i);
+            }
+            None => {}
+        }
+        self.device_names
+            .insert(0, (node.to_string(), name.to_string()));
+        self.device_names.truncate(DEVICE_NAMES_MAX);
+        true
     }
 }
 
@@ -170,6 +210,40 @@ mod tests {
         assert_eq!((st.page(), st.track_sort, st.window), (Page::Home, 3, None));
         std::fs::write(&p, "not json").unwrap();
         assert_eq!(UiState::load(&p), UiState::default());
+    }
+
+    #[test]
+    fn device_names_are_capped_and_optional() {
+        let mut st = UiState::default();
+        assert!(st.remember_device("bluez_output.00_11_22_33_44_55.1", "Headset", false));
+        assert!(!st.remember_device("bluez_output.00_11_22_33_44_55.1", "Headset", false));
+        assert_eq!(
+            st.device_name("bluez_output.00_11_22_33_44_55.1"),
+            Some("Headset")
+        );
+        assert_eq!(st.device_name("tunnel.office"), None);
+        assert!(!st.remember_device("", "x", false));
+        // A renamed device keeps its place unless picked.
+        assert!(st.remember_device("tunnel.office", "Office", false));
+        assert!(st.remember_device("bluez_output.00_11_22_33_44_55.1", "Phones", false));
+        assert_eq!(st.device_names[1].1, "Phones");
+        assert!(st.remember_device("bluez_output.00_11_22_33_44_55.1", "Phones", true));
+        assert_eq!(st.device_names[0].0, "bluez_output.00_11_22_33_44_55.1");
+        assert!(!st.remember_device("bluez_output.00_11_22_33_44_55.1", "Phones", true));
+        for i in 0..60 {
+            st.remember_device(&format!("tunnel.n{i}"), &format!("N{i}"), false);
+        }
+        assert_eq!(st.device_names.len(), DEVICE_NAMES_MAX);
+        assert_eq!(st.device_names[0].1, "N59");
+        assert_eq!(st.device_name("tunnel.office"), None);
+        // Saved and read back; files from before load with no names.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("ui-state.json");
+        st.save(&p).unwrap();
+        assert_eq!(UiState::load(&p).device_names, st.device_names);
+        std::fs::write(&p, r#"{"page":"albums","dac_caps":{}}"#).unwrap();
+        let old = UiState::load(&p);
+        assert_eq!((old.page(), old.device_names.len()), (Page::Albums, 0));
     }
 
     #[test]

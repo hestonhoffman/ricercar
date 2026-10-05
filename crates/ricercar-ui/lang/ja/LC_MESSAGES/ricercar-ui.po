@@ -350,6 +350,10 @@ msgid "SHARED"
 msgstr "共有"
 
 msgctxt "SettingsPage"
+msgid "NOT CONNECTED"
+msgstr "未接続"
+
+msgctxt "SettingsPage"
 msgid "Hide capabilities"
 msgstr "対応仕様を隠す"
 

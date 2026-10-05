@@ -509,8 +509,10 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     let chain = ui.ctx.ctl.engine_chain();
     let c = &chain;
     let fmt = c.format;
+    // A PipeWire node may be gone: PipeWire then plays to its default sink.
+    crate::outputs::poll(&c.device, st.status == TransportStatus::Playing);
     let sig = format!(
-        "{:?}{:?}{}{}{}{}{}{:?}{:?}",
+        "{:?}{:?}{}{}{}{}{}{:?}{:?}{}",
         fmt,
         c.container,
         c.bit_perfect,
@@ -519,7 +521,8 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         st.fixed_volume,
         c.device,
         info.as_ref().map(|i| &i.uri),
-        st.delivery
+        st.delivery,
+        crate::outputs::rev()
     );
     if ui.player.borrow().chain_sig == sig {
         return;
@@ -553,7 +556,8 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     // shared device never qualifies, whatever the engine's own flag says.
     let hardware = c.device_kind == DeviceKind::Hardware;
     app.set_bitperfect(fmt.is_some() && c.bit_perfect && hardware);
-    app.set_device_label(device_label(&c.device).into());
+    let output = crate::outputs::describe(ui, &c.device);
+    app.set_device_label(output.playing.clone().into());
 
     let mut hops = Vec::new();
     // A plugin hands over a URL; what follows is decoded and played as is.
@@ -645,11 +649,14 @@ fn update_chain(ui: &Ui, st: &CtlState) {
             state: 0,
         });
     }
-    let device = device_label(&c.device);
     let (dev_desc, dev_state) = match c.device_kind {
         DeviceKind::Hardware => (format!("{} · {}", c.device, t("exclusive, no mixer")), 0),
         DeviceKind::Virtual => (
-            format!("{device} · {}", t("shared: may resample or mix")),
+            format!(
+                "{} · {}",
+                output.absent.as_deref().unwrap_or(&output.label),
+                t("shared: may resample or mix")
+            ),
             1,
         ),
         DeviceKind::Null => (t("Null sink: audio discarded").to_string(), 1),
@@ -712,7 +719,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         label: "".into(),
         value: match c.device_kind {
             DeviceKind::Null => t("Null sink").into(),
-            _ => device.into(),
+            _ => output.playing.into(),
         },
         state: dev_state,
     });
@@ -930,39 +937,6 @@ fn fetch_lyrics(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
 }
 
 // ------------------------------------------------------------------ notifications
-
-/// A readable name for a PipeWire output (`pipewire:NODE="bluez_output…"`
-/// → the headset's name), read once from the device list; other devices
-/// keep their ALSA name.
-fn device_label(name: &str) -> String {
-    thread_local! {
-        static LABELS: std::cell::RefCell<std::collections::HashMap<String, String>> =
-            Default::default();
-    }
-    if !name.starts_with("pipewire:NODE=") {
-        return name.to_string();
-    }
-    if let Some(label) = LABELS.with(|l| l.borrow().get(name).cloned()) {
-        return label;
-    }
-    // Only a name found in the device list is kept: a device that is not
-    // listed yet (Bluetooth still connecting) is looked up again next time.
-    let found = ricercar_audio::device::list_devices()
-        .into_iter()
-        .find(|d| d.name == name)
-        // "WH-1000XM4 (Bluetooth, not bit-perfect)" → "WH-1000XM4"
-        .map(|d| match d.description.rsplit_once(" (") {
-            Some((n, _)) => n.to_string(),
-            None => d.description,
-        });
-    match found {
-        Some(label) => {
-            LABELS.with(|l| l.borrow_mut().insert(name.to_string(), label.clone()));
-            label
-        }
-        None => name.to_string(),
-    }
-}
 
 /// A small file of a cover given by URL (plugin tracks), for the
 /// notification: downloaded once into the cover cache.

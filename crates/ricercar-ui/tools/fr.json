@@ -430,5 +430,11 @@
 "Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume.": "Les échantillons arrivent intacts au périphérique : fréquence native, sans rééchantillonnage, sans mixeur, sans traitement du volume. Volume fixé à 100 % : réglez le volume sur votre amplificateur.",
 "Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback.": "Un maillon de la chaîne modifie les échantillons (ReplayGain ou périphérique partagé). Le volume est fixé à 100 % ; désactivez ReplayGain et choisissez un périphérique hw: pour une lecture bit-perfect.",
 "Every sample reaches the DAC exactly as it is in the file. Volume fixed at 100 %: use your amplifier's volume.": "Chaque échantillon arrive au DAC exactement tel qu'il est dans le fichier. Volume fixé à 100 % : réglez le volume sur votre amplificateur.",
-"Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples.": "Volume fixé à 100 %. ReplayGain ou un périphérique partagé (non hw:) modifie les échantillons."
+"Volume fixed at 100 %. ReplayGain or a shared (non hw:) device alters the samples.": "Volume fixé à 100 %. ReplayGain ou un périphérique partagé (non hw:) modifie les échantillons.",
+"Bluetooth device": "Appareil Bluetooth",
+"{name} (not connected)": "{name} (non connecté)",
+"{output} · default output; {device} not connected": "{output} · sortie par défaut ; {device} non connecté",
+"PipeWire default output": "Sortie PipeWire par défaut",
+"PipeWire default output; {device} not connected": "Sortie PipeWire par défaut ; {device} non connecté",
+"NOT CONNECTED": "NON CONNECTÉ"
 }
