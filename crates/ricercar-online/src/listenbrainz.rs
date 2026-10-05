@@ -94,7 +94,9 @@ impl ListenBrainz {
             .set("Content-Type", "application/json");
         match http::send(req.send_string(&body.to_string())) {
             Ok(_) => Ok(()),
-            Err(OnlineError::Http { status: 401, body }) => Err(OnlineError::Auth(body)),
+            Err(OnlineError::Http { status: 401, body }) => Err(OnlineError::Auth(
+                crate::error::body_summary(&body).unwrap_or_else(|| "token rejected".into()),
+            )),
             Err(e) => Err(e),
         }
     }
