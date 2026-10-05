@@ -784,6 +784,9 @@ impl Controller {
         for (pos, orig) in order.iter().enumerate() {
             natural[*orig] = pos;
         }
+        // A shuffled play turns shuffle on, so the mode shown matches the
+        // queue and turning it off restores the list's order.
+        self.lock().shuffle = true;
         self.play_tracks_in(shuffled, 0, ctx, Some(natural));
     }
 
@@ -2052,6 +2055,19 @@ mod tests {
 
     fn current_title(c: &Controller) -> String {
         c.lock().current_item().unwrap().info.title.clone()
+    }
+
+    #[test]
+    fn shuffle_play_turns_shuffle_on() {
+        let c = ctl();
+        assert!(!c.lock().shuffle);
+        c.play_shuffled((1..=12).map(info).collect(), PlayContext::Album("a".into()));
+        assert!(c.lock().shuffle, "shuffle mode follows a shuffled play");
+        c.set_shuffle(false);
+        let t = titles(&c);
+        let cur = c.lock().current.unwrap();
+        assert_eq!(t, (1..=12).map(|n| format!("t{n}")).collect::<Vec<_>>());
+        assert_eq!(c.lock().queue[cur].info.title, t[cur]);
     }
 
     #[test]
