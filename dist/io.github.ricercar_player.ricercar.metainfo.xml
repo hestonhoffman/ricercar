@@ -55,23 +55,29 @@
   <screenshots>
     <screenshot type="default">
       <caption>Home</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.8.0/docs/screenshots/home.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.9.0/docs/screenshots/home.jpg</image>
     </screenshot>
     <screenshot>
       <caption>An album</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.8.0/docs/screenshots/album.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.9.0/docs/screenshots/album.jpg</image>
     </screenshot>
     <screenshot>
       <caption>Synced lyrics</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.8.0/docs/screenshots/lyrics.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.9.0/docs/screenshots/lyrics.jpg</image>
     </screenshot>
     <screenshot>
       <caption>The signal path, from file to DAC</caption>
-      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.8.0/docs/screenshots/signal-path.jpg</image>
+      <image>https://raw.githubusercontent.com/ricercar-player/ricercar/v0.9.0/docs/screenshots/signal-path.jpg</image>
     </screenshot>
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.9.0" date="2026-10-05">
+      <description>
+        <p>DSD files and SACD images, converted to PCM or (experimental) sent as DoP or native DSD; plugins added from a link, a GitHub repository or a file; the same actions on album, playlist and artist pages; a loading indicator and received ranges for network streams; no more freezes under heavy disk writes.</p>
+      </description>
+      <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.9.0</url>
+    </release>
     <release version="0.8.0" date="2026-10-05">
       <description>
         <p>Fixed volume for bit-perfect playback; albums ripped as one file with a CUE sheet play as their tracks, gapless; readable names for outputs that are not connected; clearer network errors.</p>
