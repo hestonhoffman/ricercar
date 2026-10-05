@@ -114,6 +114,12 @@ export struct DeviceRow {
     caps-status: string,
     // library albums this device cannot play natively, one per line
     lib-note: string,
+    // DSD output (hw: devices): 0 convert to PCM, 1 DoP, 2 native
+    dsd-choice: int,
+    // the driver offers ALSA DSD formats: native is offered
+    dsd-native: bool,
+    // "DoP" / "NATIVE DSD" on the row when not converting
+    dsd-badge: string,
 }
 
 // A declared source plugin, for the settings page.
@@ -486,6 +492,7 @@ export global App {
     callback select-device(string);
     callback refresh-devices();
     callback toggle-device-caps(string);
+    callback set-device-dsd(string, int); // device, 0 pcm / 1 dop / 2 native
     in-out property <int> replaygain; // 0 off, 1 track, 2 album, 3 auto
     in-out property <float> preamp;
     callback settings-changed();

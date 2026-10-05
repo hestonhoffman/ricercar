@@ -52,6 +52,25 @@ component DeviceCaps inherits VerticalLayout {
         Text { text: dev.channels; font-size: Theme.fs-sm; color: Theme.text; }
     }
     if dev.lib-note != "": Text { text: dev.lib-note; font-size: Theme.fs-sm; color: Theme.warn; wrap: word-wrap; }
+    HorizontalLayout {
+        spacing: 6px;
+        Text { width: 110px; text: @tr("DSD"); font-size: Theme.fs-sm; color: Theme.text3; vertical-alignment: center; }
+        Segmented {
+            label: @tr("DSD output");
+            options: dev.dsd-native
+                ? [@tr("Convert to PCM"), @tr("DoP"), @tr("Native")]
+                : [@tr("Convert to PCM"), @tr("DoP")];
+            selected: dev.dsd-choice;
+            changed(i) => { App.set-device-dsd(dev.name, i); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+    }
+    Text {
+        text: @tr("Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.");
+        font-size: Theme.fs-sm;
+        color: Theme.text2;
+        wrap: word-wrap;
+    }
 }
 
 // ------------------------------------------------------------------ radio
@@ -361,6 +380,7 @@ export component SettingsPage inherits PageScroll {
                         if d.hardware: Badge { y: (parent.height - self.height) / 2; text: @tr("BIT-PERFECT"); tint: Theme.good; }
                         if d.shared: Badge { y: (parent.height - self.height) / 2; text: @tr("SHARED"); tint: Theme.warn; }
                         if d.absent: Badge { y: (parent.height - self.height) / 2; text: @tr("NOT CONNECTED"); tint: Theme.warn; }
+                        if d.dsd-badge != "": Badge { y: (parent.height - self.height) / 2; text: d.dsd-badge; tint: Theme.accent; }
                         if d.hardware: IconButton {
                             y: (parent.height - self.height) / 2;
                             icon: d.expanded ? Icons.chevron-up : Icons.chevron-down;

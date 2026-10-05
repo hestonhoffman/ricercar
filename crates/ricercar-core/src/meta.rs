@@ -80,11 +80,53 @@ fn text(tag: Option<&Tag>, key: ItemKey) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Tags and format of a DSF / DFF file (lofty does not read them).
+fn read_dsd_tags(path: &Path, fallback_title: String) -> TagInfo {
+    let Ok(f) = ricercar_audio::dsd::probe(path) else {
+        return TagInfo {
+            title: Some(fallback_title),
+            ..Default::default()
+        };
+    };
+    let get = |k: &str| {
+        f.tags
+            .iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    TagInfo {
+        title: get("title").or(Some(fallback_title)),
+        artist: get("artist"),
+        album_artist: get("albumartist"),
+        album: get("album"),
+        track: parse_u32(get("tracknumber").as_deref()),
+        disc: parse_u32(get("discnumber").as_deref()),
+        year: parse_year(get("date").as_deref()),
+        genre: get("genre"),
+        composer: get("composer"),
+        duration_ms: f.duration_ms(),
+        sample_rate: Some(f.format.rate),
+        bits: Some(1),
+        channels: Some(f.format.channels.min(255) as u8),
+        bitrate: Some(f.format.rate / 1000 * f.format.channels as u32),
+        codec: Some(f.codec.to_string()),
+        ..Default::default()
+    }
+}
+
+fn is_dsd(path: &Path) -> bool {
+    path.to_str().is_some_and(ricercar_audio::dsd::is_dsd_path)
+}
+
 pub fn read_tags(path: &Path) -> TagInfo {
     let fallback_title = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
+    if is_dsd(path) {
+        return read_dsd_tags(path, fallback_title);
+    }
     let tf = match Probe::open(path).and_then(|p| p.read()) {
         Ok(tf) => tf,
         Err(_) => {
@@ -169,6 +211,9 @@ pub fn local_lyrics(path: &Path) -> Option<String> {
 
 /// First embedded picture: (bytes, mime).
 pub fn embedded_cover(path: &Path) -> Option<(Vec<u8>, String)> {
+    if is_dsd(on_disk(path)) {
+        return ricercar_audio::dsd::probe(on_disk(path)).ok()?.picture;
+    }
     let tf = Probe::open(on_disk(path)).ok()?.read().ok()?;
     let tag = tf.primary_tag().or_else(|| tf.first_tag())?;
     let pics = tag.pictures();

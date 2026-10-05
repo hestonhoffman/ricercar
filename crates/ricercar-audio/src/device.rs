@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 
+use crate::dsd::native::NativeFormat;
 use crate::error::{AudioError, Result};
 use crate::fmt::Container;
 
@@ -299,6 +300,8 @@ pub struct DeviceCaps {
     pub formats: Vec<Container>,
     pub rates: Vec<u32>,
     pub channels: RangeInclusive<u32>,
+    /// ALSA DSD formats the driver offers (native DSD).
+    pub dsd: Vec<NativeFormat>,
 }
 
 /// Rates worth reporting (the ones music actually comes in).
@@ -321,12 +324,16 @@ impl DeviceCaps {
                 .collect(),
             rates: PROBE_RATES.into_iter().filter(|&r| rate_ok(r)).collect(),
             channels,
+            dsd: Vec::new(),
         }
     }
 
     /// Everything goes (null / file sinks).
     pub fn unrestricted() -> DeviceCaps {
-        DeviceCaps::from_tests(|_| true, |_| true, 1..=32)
+        DeviceCaps {
+            dsd: NativeFormat::ALL.to_vec(),
+            ..DeviceCaps::from_tests(|_| true, |_| true, 1..=32)
+        }
     }
 
     pub fn supports_rate(&self, rate: u32) -> bool {
@@ -369,11 +376,18 @@ pub fn probe_device(name: &str) -> Result<DeviceCaps> {
         .map_err(err)?;
     let channels = hw.get_channels_min().map_err(err)?..=hw.get_channels_max().map_err(err)?;
     let formats = supported_containers(&hw);
-    Ok(DeviceCaps::from_tests(
-        |c| formats.contains(&c),
-        |r| hw.test_rate(r).is_ok(),
-        channels,
-    ))
+    let dsd = NativeFormat::ALL
+        .into_iter()
+        .filter(|f| hw.test_format(f.alsa()).is_ok())
+        .collect();
+    Ok(DeviceCaps {
+        dsd,
+        ..DeviceCaps::from_tests(
+            |c| formats.contains(&c),
+            |r| hw.test_rate(r).is_ok(),
+            channels,
+        )
+    })
 }
 
 #[cfg(test)]

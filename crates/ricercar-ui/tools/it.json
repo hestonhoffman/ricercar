@@ -437,5 +437,17 @@
 "PipeWire default output": "Uscita predefinita di PipeWire",
 "PipeWire default output; {device} not connected": "Uscita predefinita di PipeWire; {device} non connesso",
 "NOT CONNECTED": "NON CONNESSO",
-"CUE track {n}": "Traccia CUE {n}"
+"CUE track {n}": "Traccia CUE {n}",
+"DSD": "DSD",
+"DSD output": "Uscita DSD",
+"Convert to PCM": "Converti in PCM",
+"DoP": "DoP",
+"Native": "Nativo",
+"Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.": "«Converti in PCM» riproduce i file DSD ovunque, non bit-perfect. DoP e nativo inviano i bit DSD intatti, a volume fisso. Scegli DoP solo se il tuo DAC lo supporta: un DAC senza DSD lo riproduce come un forte rumore.",
+"DSD: DoP": "DSD: DoP",
+"DSD: NATIVE": "DSD: NATIVO",
+"DoP {rate} kHz / 24-bit → DAC": "DoP {rate} kHz / 24 bit → DAC",
+"Native DSD ({format}) → DAC": "DSD nativo ({format}) → DAC",
+"Converted to PCM 24-bit / {rate} kHz, not bit-perfect": "Convertito in PCM 24 bit / {rate} kHz, non bit-perfect",
+"Bypassed for DSD: volume, mute and ReplayGain do not apply": "Escluso per il DSD: volume, muto e ReplayGain non si applicano"
 }

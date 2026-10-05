@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+use ricercar_audio::dsd::DsdMode;
 use ricercar_audio::{DeviceKind, TransportStatus};
 use ricercar_core::{CtlEvent, CtlState, Origin, PlayContext, Repeat, TrackInfo};
 use ricercar_online::lyrics::{LyricLine as Line, LyricsSource};
@@ -512,7 +513,8 @@ fn update_chain(ui: &Ui, st: &CtlState) {
     // A PipeWire node may be gone: PipeWire then plays to its default sink.
     crate::outputs::poll(&c.device, st.status == TransportStatus::Playing);
     let sig = format!(
-        "{:?}{:?}{}{}{}{}{}{:?}{:?}{}",
+        "{:?}{:?}{:?}{}{}{}{}{}{:?}{:?}{}",
+        c.dsd,
         fmt,
         c.container,
         c.bit_perfect,
@@ -536,9 +538,16 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         app.set_chain_known(false);
         return;
     };
-    // Prefer what the decoder actually produced over tag hints.
-    let rate = fmt.map(|f| f.sample_rate).or(info.sample_rate);
-    let bits = fmt.map(|f| f.bits).or(info.bits);
+    // Prefer what the decoder actually produced over tag hints; DSD is
+    // labelled by its own rate, not by what carries it.
+    let dsd = c.dsd;
+    let (rate, bits) = match dsd {
+        Some(d) => (Some(d.source.rate), Some(1)),
+        None => (
+            fmt.map(|f| f.sample_rate).or(info.sample_rate),
+            fmt.map(|f| f.bits).or(info.bits),
+        ),
+    };
     let lossy = matches!(
         info.codec.as_deref(),
         Some("MP3" | "AAC" | "Vorbis" | "Opus")
@@ -580,15 +589,23 @@ fn update_chain(ui: &Ui, st: &CtlState) {
             state: 0,
         });
     }
-    let src_val = match (info.codec.as_deref(), fmt) {
-        (codec, Some(f)) => format!(
+    let src_val = match (info.codec.as_deref(), fmt, dsd) {
+        // "DSF · DSD64 · 2.8224 MHz · 2 ch"
+        (codec, Some(_), Some(d)) => format!(
+            "{}{} · {} MHz · {} ch",
+            codec.map(|c| format!("{c} · ")).unwrap_or_default(),
+            ricercar_audio::dsd::rate_label(d.source.rate),
+            d.source.rate as f64 / 1e6,
+            d.source.channels
+        ),
+        (codec, Some(f), None) => format!(
             "{}{} kHz · {} ch{}",
             codec.map(|c| format!("{c} · ")).unwrap_or_default(),
             khz(f.sample_rate),
             f.channels,
             if lossy { " · lossy" } else { "" }
         ),
-        (Some(c), None) => c.to_string(),
+        (Some(c), None, _) => c.to_string(),
         _ => "—".into(),
     };
     // A track cut from a whole-disc file by its cue sheet.
@@ -611,8 +628,33 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         value: src_val.into(),
         state: if lossy { 1 } else { 0 },
     });
-    if let Some(f) = fmt {
-        hops.push(ChainHop {
+    match (fmt, dsd) {
+        (Some(f), Some(d)) => {
+            let rate = khz(f.sample_rate);
+            let (value, state) = match d.mode {
+                DsdMode::Dop => (tf("DoP {rate} kHz / 24-bit → DAC", &[("rate", &rate)]), 0),
+                DsdMode::Native => (
+                    tf(
+                        "Native DSD ({format}) → DAC",
+                        &[("format", c.container.unwrap_or("DSD"))],
+                    ),
+                    0,
+                ),
+                DsdMode::Pcm => (
+                    tf(
+                        "Converted to PCM 24-bit / {rate} kHz, not bit-perfect",
+                        &[("rate", &rate)],
+                    ),
+                    1,
+                ),
+            };
+            hops.push(ChainHop {
+                label: t("DSD").into(),
+                value: value.into(),
+                state,
+            });
+        }
+        (Some(f), None) => hops.push(ChainHop {
             label: t("Decoder").into(),
             value: tf(
                 "Decoded to {bits}-bit integer PCM",
@@ -620,10 +662,23 @@ fn update_chain(ui: &Ui, st: &CtlState) {
             )
             .into(),
             state: if lossy { 1 } else { 0 },
+        }),
+        _ => {}
+    }
+    // DoP and native DSD go out at unity gain, whatever the settings.
+    let gain_locked = dsd.is_some_and(|d| d.gain_locked());
+    if gain_locked {
+        hops.push(ChainHop {
+            label: t("Volume").into(),
+            value: t("Bypassed for DSD: volume, mute and ReplayGain do not apply").into(),
+            state: 0,
         });
     }
     // Volume only appears when it changes the samples.
-    let gain_touch = st.muted || st.volume < 100 || (!c.bit_perfect && hardware && c.volume == 100);
+    let gain_touch = !gain_locked
+        && (st.muted
+            || st.volume < 100
+            || (!c.bit_perfect && hardware && c.volume == 100 && dsd.is_none()));
     if gain_touch {
         let value = if st.muted {
             t("Muted").to_string()
@@ -639,7 +694,7 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         });
     }
     // Fixed at 100 %: no volume processing, said explicitly.
-    if st.fixed_volume {
+    if st.fixed_volume && !gain_locked {
         hops.push(ChainHop {
             label: t("Volume").into(),
             value: t("Volume fixed at 100 %").into(),

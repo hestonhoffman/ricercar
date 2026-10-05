@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender as CbSender, TryRecvError};
 
 use crate::device::{DeviceInfo, DeviceKind};
+use crate::dsd::{DsdFormat, DsdMode, dop};
 use crate::error::AudioError;
-use crate::fmt::PcmFormat;
+use crate::fmt::{PcmFormat, Wire};
 pub use crate::gain::{GainStage, TrackOpts};
 use crate::redact::redact_url;
 use crate::sink::{AudioSink, device_info, make_sink};
@@ -46,6 +47,10 @@ pub enum EngineCommand {
     },
     SetMute {
         muted: bool,
+    },
+    /// How DSD tracks opened from now on reach this device.
+    SetDsdMode {
+        mode: DsdMode,
     },
 }
 
@@ -116,6 +121,23 @@ impl EventHub {
     }
 }
 
+/// A DSD track in the chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DsdChain {
+    pub source: DsdFormat,
+    /// How it reaches the device (after the guard: never DoP or native on
+    /// a shared device). DoP and native run at unity gain whatever the
+    /// volume, mute, ReplayGain and preamp say.
+    pub mode: DsdMode,
+}
+
+impl DsdChain {
+    /// Volume and gain are bypassed: the bits go out untouched.
+    pub fn gain_locked(&self) -> bool {
+        self.mode.is_bit_perfect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChainInfo {
     pub device: String,
@@ -126,8 +148,11 @@ pub struct ChainInfo {
     pub volume: u32,
     /// Lossless all the way: native rate, lossless container, unity gain
     /// (volume 100, no ReplayGain/preamp, not muted), and a device kind that
-    /// excludes mixing/resampling.
+    /// excludes mixing/resampling. DSD: DoP or native (converted PCM never
+    /// is).
     pub bit_perfect: bool,
+    /// Set while a DSD track plays.
+    pub dsd: Option<DsdChain>,
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +223,11 @@ impl PlayerHandle {
     pub fn set_mute(&self, muted: bool) {
         self.send(EngineCommand::SetMute { muted });
     }
+    /// DSD output mode for this device; DoP and native fall back to PCM on
+    /// anything but a `hw:` device (or the test sinks).
+    pub fn set_dsd_mode(&self, mode: DsdMode) {
+        self.send(EngineCommand::SetDsdMode { mode });
+    }
     pub fn subscribe(&self) -> Subscriber {
         self.hub.subscribe()
     }
@@ -225,7 +255,7 @@ pub fn spawn_player_with_sink(sink: Box<dyn AudioSink>) -> PlayerHandle {
         pos_ms: 0,
         dur_ms: None,
         seekable: false,
-        chain: chain_of(&device, None, None, &gain),
+        chain: chain_of(&device, None, None, &gain, None),
         gain,
         stream_title: None,
     }));
@@ -241,6 +271,10 @@ pub fn spawn_player_with_sink(sink: Box<dyn AudioSink>) -> PlayerHandle {
         gain,
         pos_frames: 0,
         last_pos_emit: Instant::now(),
+        dsd_mode: DsdMode::Pcm,
+        wire: Wire::Pcm,
+        playing_dsd: None,
+        dop_phase: false,
     };
     let alive_t = AliveGuard {
         alive: alive.clone(),
@@ -311,9 +345,9 @@ type Opened = std::result::Result<TrackSource, OpenFailure>;
 
 /// Open and prime a track; a panicking demuxer or decoder is an error like
 /// any other, not the end of the engine.
-fn open_source(uri: &str) -> Opened {
+fn open_source(uri: &str, dsd: DsdMode) -> Opened {
     let opened = catch_unwind(AssertUnwindSafe(|| {
-        TrackSource::open(uri).map(|mut src| {
+        TrackSource::open_with(uri, dsd).map(|mut src| {
             let ok = prime(&mut src);
             (src, ok)
         })
@@ -347,14 +381,21 @@ fn chain_of(
     fmt: Option<PcmFormat>,
     container: Option<&'static str>,
     gain: &GainStage,
+    dsd: Option<DsdChain>,
 ) -> ChainInfo {
+    let unity = match dsd {
+        Some(d) if d.gain_locked() => true,
+        Some(_) => false, // converted to PCM
+        None => gain.is_unity(),
+    };
     ChainInfo {
         device: device.name.clone(),
         device_kind: device.kind,
         format: fmt,
         container,
         volume: gain.volume,
-        bit_perfect: gain.is_unity() && device.kind.is_bit_perfect(),
+        bit_perfect: unity && device.kind.is_bit_perfect(),
+        dsd,
     }
 }
 
@@ -381,6 +422,14 @@ struct Engine {
     /// Frames of the current track handed to the sink.
     pos_frames: u64,
     last_pos_emit: Instant,
+    /// DSD mode for tracks opened from now on (guarded).
+    dsd_mode: DsdMode,
+    /// What the sink was opened for.
+    wire: Wire,
+    /// The current track, when it is DSD.
+    playing_dsd: Option<DsdChain>,
+    /// DoP marker alternation, carried across tracks.
+    dop_phase: bool,
 }
 
 impl Engine {
@@ -489,6 +538,27 @@ impl Engine {
                 self.gain.muted = muted;
                 self.refresh_chain();
             }
+            EngineCommand::SetDsdMode { mode: wanted } => {
+                let mode = wanted.guarded(self.device.kind);
+                if mode != wanted {
+                    tracing::info!(
+                        "{}: shared device, DSD is converted to PCM",
+                        self.device.name
+                    );
+                }
+                if mode == self.dsd_mode {
+                    return;
+                }
+                self.dsd_mode = mode;
+                // A next track opened in the old mode is opened again.
+                if let Some((next, opts)) = self.next.take() {
+                    let uri = match next {
+                        NextSource::Pending(u) | NextSource::Opening(u, _) => u,
+                        NextSource::Open(t) => t.uri,
+                    };
+                    self.next = Some((NextSource::Pending(uri), opts));
+                }
+            }
         }
     }
 
@@ -507,8 +577,9 @@ impl Engine {
             .sink
             .opened_container()
             .map(|c| c.label())
+            .or_else(|| self.sink.opened_dsd().map(|d| d.label()))
             .or(st.chain.container);
-        st.chain = chain_of(&self.device, fmt, container, &self.gain);
+        st.chain = chain_of(&self.device, fmt, container, &self.gain, self.playing_dsd);
         st.gain = self.gain;
     }
 
@@ -561,6 +632,7 @@ impl Engine {
         }
         self.sink.close();
         self.current = None;
+        self.playing_dsd = None;
         self.pos_frames = 0;
         {
             let mut st = lock(&self.state);
@@ -589,7 +661,7 @@ impl Engine {
     // ------------------------------------------------------------ tracks
 
     fn open_track(&self, uri: &str) -> Option<TrackSource> {
-        self.accept(open_source(uri))
+        self.accept(open_source(uri, self.dsd_mode))
     }
 
     fn accept(&self, opened: Opened) -> Option<TrackSource> {
@@ -621,10 +693,11 @@ impl Engine {
         };
         let (tx, rx) = crossbeam_channel::bounded(1);
         let u = uri.clone();
+        let mode = self.dsd_mode;
         let spawned = std::thread::Builder::new()
             .name("ricercar-preopen".into())
             .spawn(move || {
-                let _ = tx.send(open_source(&u));
+                let _ = tx.send(open_source(&u, mode));
             });
         self.next = Some(match spawned {
             Ok(_) => (NextSource::Opening(uri, rx), opts),
@@ -678,11 +751,13 @@ impl Engine {
         self.emit_position();
     }
 
-    /// Make sure the sink runs at `fmt`; a fresh open drops what is queued,
-    /// otherwise queued audio of the previous format plays out first.
-    fn ensure_sink(&mut self, fmt: PcmFormat, fresh: bool) -> bool {
-        if !fresh && self.sink.opened_format() == Some(fmt) {
-            return true;
+    /// Make sure the sink runs at `fmt` for `wire`; a fresh open drops what
+    /// is queued, otherwise queued audio of the previous format plays out
+    /// first. Going between DSD and PCM reopens the device, as a rate
+    /// change does.
+    fn open_sink(&mut self, fmt: PcmFormat, wire: Wire, fresh: bool) -> Result<(), AudioError> {
+        if !fresh && self.sink.opened_format() == Some(fmt) && self.wire == wire {
+            return Ok(());
         }
         if fresh {
             let _ = self.sink.discard();
@@ -690,17 +765,41 @@ impl Engine {
             let _ = self.sink.drain();
         }
         self.sink.close();
-        match self.sink.open(fmt) {
-            Ok(()) => true,
-            Err(e) => {
-                self.error(format!("{}: {e}", self.device.name));
-                false
+        self.wire = Wire::Pcm;
+        match wire {
+            Wire::NativeDsd => self.sink.open_dsd(fmt),
+            Wire::Pcm | Wire::Dop => self.sink.open(fmt),
+        }?;
+        self.wire = wire;
+        self.dop_phase = false;
+        Ok(())
+    }
+
+    /// Open the sink for `src`. DSD converted to PCM steps down a rate when
+    /// the DAC refuses the first one.
+    fn sink_for(&mut self, src: &mut TrackSource, fresh: bool) -> bool {
+        loop {
+            let Some(fmt) = src.format else {
+                return false;
+            };
+            match self.open_sink(fmt, src.wire(), fresh) {
+                Ok(()) => return true,
+                Err(e @ (AudioError::FormatRefused { .. } | AudioError::UnsupportedFormat(_)))
+                    if src.lower_dsd_rate() =>
+                {
+                    tracing::info!("{}: {e}; converting DSD to a lower rate", self.device.name);
+                }
+                Err(e) => {
+                    self.error(format!("{}: {e}", self.device.name));
+                    return false;
+                }
             }
         }
     }
 
     fn begin(&mut self, src: TrackSource, opts: TrackOpts) {
         let fmt = src.format;
+        self.playing_dsd = src.dsd().map(|(source, mode)| DsdChain { source, mode });
         self.gain.track = opts;
         self.pos_frames = 0;
         {
@@ -723,13 +822,10 @@ impl Engine {
         self.next = None;
         lock(&self.state).next_uri = None;
         self.end_current(EndReason::Replaced);
-        let Some(src) = self.open_track(&uri) else {
+        let Some(mut src) = self.open_track(&uri) else {
             return self.go_stopped(false);
         };
-        let Some(fmt) = src.format else {
-            return self.go_stopped(false);
-        };
-        if !self.ensure_sink(fmt, true) {
+        if !self.sink_for(&mut src, true) {
             return self.go_stopped(false);
         }
         self.begin(src, opts);
@@ -801,8 +897,13 @@ impl Engine {
         if !src.pending.is_empty() {
             let Some(fmt) = src.format else { return };
             // A chained stream may change format mid-track.
-            if self.sink.opened_format() != Some(fmt) {
-                if !self.ensure_sink(fmt, false) {
+            if self.sink.opened_format() != Some(fmt) || self.wire != src.wire() {
+                let Some(mut cur) = self.current.take() else {
+                    return;
+                };
+                let ok = self.sink_for(&mut cur, false);
+                self.current = Some(cur);
+                if !ok {
                     self.end_current(EndReason::Error);
                     return self.go_stopped(false);
                 }
@@ -812,8 +913,14 @@ impl Engine {
                 return;
             };
             let samples = src.pending.make_contiguous();
-            self.gain.apply(samples, fmt.bits);
-            let frames = (samples.len() / fmt.channels.max(1) as usize) as u64;
+            let ch = fmt.channels.max(1) as usize;
+            match self.wire {
+                Wire::Pcm => self.gain.apply(samples, fmt.bits),
+                // DSD bits: no gain, ever.
+                Wire::Dop => dop::mark(samples, ch, &mut self.dop_phase),
+                Wire::NativeDsd => {}
+            }
+            let frames = (samples.len() / ch) as u64;
             if let Err(e) = self.sink.write_i32(samples) {
                 return self.sink_failed(e);
             }
@@ -835,6 +942,8 @@ impl Engine {
         if self.continue_same_file() {
             return;
         }
+        // DSD converted to PCM: the filters carry on into the next track.
+        let conv = self.current.as_mut().and_then(|c| c.take_dsd_converter());
         self.end_current(EndReason::Finished);
         lock(&self.state).next_uri = None;
         let next = match self.next.take() {
@@ -847,14 +956,15 @@ impl Engine {
             Some((NextSource::Pending(uri), opts)) => self.open_track(&uri).map(|t| (t, opts)),
             None => None,
         };
-        let Some((src, opts)) = next else {
+        let Some((mut src, opts)) = next else {
             return self.go_stopped(true);
         };
-        let Some(fmt) = src.format else {
+        if src.format.is_none() {
             return self.go_stopped(true);
-        };
+        }
+        src.adopt_dsd_converter(conv);
         // Native-rate switch: flush queued audio, then reopen.
-        if !self.ensure_sink(fmt, false) {
+        if !self.sink_for(&mut src, false) {
             return self.go_stopped(false);
         }
         self.begin(src, opts);

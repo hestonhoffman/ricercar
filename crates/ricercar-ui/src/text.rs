@@ -129,13 +129,16 @@ pub fn long_duration(ms: u64) -> String {
     }
 }
 
-/// "24/96", "16/44.1", "320k" (lossy).
+/// "24/96", "16/44.1", "320k" (lossy), "DSD64".
 pub fn quality(
     rate: Option<u32>,
     bits: Option<u8>,
     codec: Option<&str>,
     bitrate: Option<u32>,
 ) -> String {
+    if let Some(r) = rate.filter(|&r| ricercar_audio::dsd::is_dsd_rate(r)) {
+        return ricercar_audio::dsd::rate_label(r);
+    }
     let lossy = matches!(codec, Some("MP3" | "AAC" | "Vorbis" | "Opus"));
     if lossy {
         return bitrate.map(|b| format!("{b}k")).unwrap_or_default();
@@ -379,6 +382,14 @@ mod tests {
             "16/44.1"
         );
         assert_eq!(quality(Some(44_100), None, Some("MP3"), Some(320)), "320k");
+        assert_eq!(
+            quality(Some(2_822_400), Some(1), Some("DSF"), None),
+            "DSD64"
+        );
+        assert_eq!(
+            quality(Some(11_289_600), Some(1), Some("DST"), None),
+            "DSD256"
+        );
         assert_eq!(
             unsupported_albums(12, 352_800),
             "12 albums at 352.8 kHz can't be played natively on this DAC"

@@ -1,4 +1,5 @@
 use crate::device::{DeviceInfo, DeviceKind, alsa_format, classify, supported_containers};
+use crate::dsd::native::{self, NativeFormat};
 use crate::error::{AudioError, Result};
 use crate::fmt::{Container, PcmFormat, append_container, negotiate};
 
@@ -11,7 +12,18 @@ pub trait AudioSink: Send {
     fn opened_container(&self) -> Option<Container>;
     /// (Re)open the sink at the exact given format.
     fn open(&mut self, fmt: PcmFormat) -> Result<()>;
-    /// Write interleaved LSB-aligned i32 samples; consumes them all or errors.
+    /// Open for native DSD: `fmt` is the 32-bit word stream (rate = DSD
+    /// rate / 32); the sink picks the DSD format the device takes.
+    fn open_dsd(&mut self, fmt: PcmFormat) -> Result<()> {
+        let _ = fmt;
+        Err(refuse(self.device(), "native DSD".into()))
+    }
+    /// DSD format negotiated by the last `open_dsd`.
+    fn opened_dsd(&self) -> Option<NativeFormat> {
+        None
+    }
+    /// Write interleaved LSB-aligned i32 samples (native DSD: words);
+    /// consumes them all or errors.
     fn write_i32(&mut self, samples: &[i32]) -> Result<()>;
     /// Flush everything currently queued (used before a format change).
     fn drain(&mut self) -> Result<()>;
@@ -91,6 +103,7 @@ pub struct AlsaSink {
     pcm: Option<alsa::PCM>,
     fmt: Option<PcmFormat>,
     container: Option<Container>,
+    dsd: Option<NativeFormat>,
     can_pause: bool,
     dropped: u64,
     bytes: Vec<u8>,
@@ -103,10 +116,16 @@ impl AlsaSink {
             pcm: None,
             fmt: None,
             container: None,
+            dsd: None,
             can_pause: false,
             dropped: 0,
             bytes: Vec::new(),
         }
+    }
+
+    /// ALSA frames per frame of the engine (native DSD splits words).
+    fn per_frame(&self) -> u64 {
+        self.dsd.map_or(1, |d| d.frames_per_word() as u64)
     }
 
     fn err(&self, e: alsa::Error) -> AudioError {
@@ -122,22 +141,37 @@ impl AlsaSink {
         }
     }
 
-    fn configure(&self, pcm: &alsa::PCM, fmt: PcmFormat) -> Result<(Container, bool)> {
+    /// Configure the PCM: a linear container for `fmt`, or with `dsd` the
+    /// first DSD format the device takes, at its own rate.
+    fn configure(
+        &self,
+        pcm: &alsa::PCM,
+        fmt: PcmFormat,
+        dsd: bool,
+    ) -> Result<(Option<Container>, Option<NativeFormat>, bool)> {
         let err = |e| self.err(e);
         let h = alsa::pcm::HwParams::any(pcm).map_err(err)?;
         h.set_access(alsa::pcm::Access::RWInterleaved)
             .map_err(err)?;
-        let container = negotiate_or_refuse(&self.device, fmt, &supported_containers(&h))?;
-        let alsa_fmt = alsa_format(container);
+        let (container, native, alsa_fmt, rate) = if dsd {
+            let f = NativeFormat::ALL
+                .into_iter()
+                .find(|f| h.test_format(f.alsa()).is_ok())
+                .ok_or_else(|| refuse(&self.device, "native DSD (no DSD format)".into()))?;
+            let rate = fmt.sample_rate * f.frames_per_word() as u32;
+            (None, Some(f), f.alsa(), rate)
+        } else {
+            let c = negotiate_or_refuse(&self.device, fmt, &supported_containers(&h))?;
+            (Some(c), None, alsa_format(c), fmt.sample_rate)
+        };
         h.set_format(alsa_fmt).map_err(err)?;
         h.set_channels(fmt.channels as u32)
             .map_err(|_| refuse(&self.device, format!("{} channels", fmt.channels)))?;
-        if h.test_rate(fmt.sample_rate).is_err() {
-            return Err(refuse(&self.device, format!("{} Hz", fmt.sample_rate)));
+        if h.test_rate(rate).is_err() {
+            return Err(refuse(&self.device, format!("{rate} Hz")));
         }
-        h.set_rate(fmt.sample_rate, alsa::ValueOr::Nearest)
-            .map_err(err)?;
-        let period = (fmt.sample_rate / 20).clamp(1024, 16384) as alsa::pcm::Frames;
+        h.set_rate(rate, alsa::ValueOr::Nearest).map_err(err)?;
+        let period = (rate / 20).clamp(1024, 16384) as alsa::pcm::Frames;
         h.set_period_size_near(period, alsa::ValueOr::Nearest)
             .map_err(err)?;
         h.set_periods(4, alsa::ValueOr::Nearest).map_err(err)?;
@@ -151,7 +185,7 @@ impl AlsaSink {
             cur.get_channels().map_err(err)?,
             cur.get_format().map_err(err)?,
         );
-        if got != (fmt.sample_rate, fmt.channels as u32, alsa_fmt) {
+        if got != (rate, fmt.channels as u32, alsa_fmt) {
             return Err(AudioError::UnsupportedFormat(self.device.name.clone()));
         }
         let can_pause = cur.can_pause();
@@ -160,7 +194,20 @@ impl AlsaSink {
         s.set_start_threshold(period_size).map_err(err)?;
         s.set_avail_min(period_size).map_err(err)?;
         pcm.sw_params(&s).map_err(err)?;
-        Ok((container, can_pause))
+        Ok((container, native, can_pause))
+    }
+
+    fn open_as(&mut self, fmt: PcmFormat, dsd: bool) -> Result<()> {
+        self.close();
+        let pcm = alsa::PCM::new(&self.device.name, alsa::Direction::Playback, false)
+            .map_err(|e| self.err(e))?;
+        let (container, native, can_pause) = self.configure(&pcm, fmt, dsd)?;
+        self.pcm = Some(pcm);
+        self.fmt = Some(fmt);
+        self.container = container;
+        self.dsd = native;
+        self.can_pause = can_pause;
+        Ok(())
     }
 }
 
@@ -174,27 +221,36 @@ impl AudioSink for AlsaSink {
     fn opened_container(&self) -> Option<Container> {
         self.container
     }
+    fn opened_dsd(&self) -> Option<NativeFormat> {
+        self.dsd
+    }
 
     fn open(&mut self, fmt: PcmFormat) -> Result<()> {
-        self.close();
-        let pcm = alsa::PCM::new(&self.device.name, alsa::Direction::Playback, false)
-            .map_err(|e| self.err(e))?;
-        let (container, can_pause) = self.configure(&pcm, fmt)?;
-        self.pcm = Some(pcm);
-        self.fmt = Some(fmt);
-        self.container = Some(container);
-        self.can_pause = can_pause;
-        Ok(())
+        self.open_as(fmt, false)
+    }
+
+    fn open_dsd(&mut self, fmt: PcmFormat) -> Result<()> {
+        self.open_as(fmt, true)
     }
 
     fn write_i32(&mut self, samples: &[i32]) -> Result<()> {
-        let (Some(pcm), Some(container), Some(f)) = (&self.pcm, self.container, self.fmt) else {
+        let (Some(pcm), Some(f)) = (&self.pcm, self.fmt) else {
             return Err(AudioError::UnsupportedSource("sink not open".into()));
         };
         self.bytes.clear();
-        append_container(&mut self.bytes, samples, container, f.bits);
+        let sample_bytes = match (self.container, self.dsd) {
+            (Some(c), _) => {
+                append_container(&mut self.bytes, samples, c, f.bits);
+                c.bytes_per_sample()
+            }
+            (None, Some(d)) => {
+                native::append(&mut self.bytes, samples, f.channels as usize, d);
+                d.bytes()
+            }
+            (None, None) => return Err(AudioError::UnsupportedSource("sink not open".into())),
+        };
         let io = pcm.io_bytes();
-        let frame_bytes = container.bytes_per_sample() * f.channels as usize;
+        let frame_bytes = sample_bytes * f.channels as usize;
         let mut off = 0usize;
         let mut recoveries = 0;
         while off < self.bytes.len() {
@@ -229,6 +285,7 @@ impl AudioSink for AlsaSink {
         self.pcm = None;
         self.fmt = None;
         self.container = None;
+        self.dsd = None;
         self.can_pause = false;
         self.dropped = 0;
     }
@@ -247,7 +304,7 @@ impl AudioSink for AlsaSink {
         }
         let queued = pcm.delay().map_or(0, |d| d.max(0) as u64);
         pcm.drop().map_err(|e| self.err(e))?;
-        self.dropped = queued;
+        self.dropped = queued / self.per_frame();
         Ok(())
     }
 
@@ -275,6 +332,7 @@ impl AudioSink for AlsaSink {
             .as_ref()
             .and_then(|p| p.delay().ok())
             .map_or(0, |d| d.max(0) as u64)
+            / self.per_frame()
     }
 
     fn take_dropped_frames(&mut self) -> u64 {
@@ -284,17 +342,32 @@ impl AudioSink for AlsaSink {
 
 // ---------------------------------------------------------------- file
 
-/// `file:<path>[?formats=S32_LE,S24_3LE]`: the optional list restricts the
-/// containers the sink accepts, emulating a DAC's capabilities.
-pub fn parse_file_spec(name: &str) -> (String, Vec<Container>) {
+/// `file:<path>[?formats=S32_LE,S24_3LE,DSD_U32_BE]`: the optional list
+/// restricts the containers and DSD formats the sink accepts, emulating a
+/// DAC's capabilities. Without it, it takes every container and DSD_U32_BE.
+pub fn parse_file_spec(name: &str) -> (String, Vec<Container>, Vec<NativeFormat>) {
     let spec = name.strip_prefix("file:").unwrap_or(name);
     if let Some((path, list)) = spec.rsplit_once("?formats=") {
-        let formats: Option<Vec<Container>> = list.split(',').map(Container::from_label).collect();
-        if let Some(formats) = formats {
-            return (path.to_string(), formats);
+        let (mut pcm, mut dsd) = (Vec::new(), Vec::new());
+        let known = list.split(',').all(|l| {
+            if let Some(c) = Container::from_label(l) {
+                pcm.push(c);
+            } else if let Some(d) = NativeFormat::from_label(l) {
+                dsd.push(d);
+            } else {
+                return false;
+            }
+            true
+        });
+        if known {
+            return (path.to_string(), pcm, dsd);
         }
     }
-    (spec.to_string(), Container::ALL.to_vec())
+    (
+        spec.to_string(),
+        Container::ALL.to_vec(),
+        vec![NativeFormat::U32Be],
+    )
 }
 
 /// Writes exactly the bytes that would be handed to ALSA for the negotiated
@@ -303,24 +376,40 @@ pub struct FileSink {
     device: DeviceInfo,
     path: String,
     supported: Vec<Container>,
+    supported_dsd: Vec<NativeFormat>,
     fmt: Option<PcmFormat>,
     container: Option<Container>,
+    dsd: Option<NativeFormat>,
     file: Option<std::io::BufWriter<std::fs::File>>,
     bytes: Vec<u8>,
 }
 
 impl FileSink {
     pub fn new(device: DeviceInfo) -> FileSink {
-        let (path, supported) = parse_file_spec(&device.name);
+        let (path, supported, supported_dsd) = parse_file_spec(&device.name);
         FileSink {
             device,
             path,
             supported,
+            supported_dsd,
             fmt: None,
             container: None,
+            dsd: None,
             file: None,
             bytes: Vec::new(),
         }
+    }
+}
+
+impl FileSink {
+    fn open_file(&mut self) -> Result<()> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(AudioError::Io)?;
+        self.file = Some(std::io::BufWriter::new(file));
+        Ok(())
     }
 }
 
@@ -334,26 +423,38 @@ impl AudioSink for FileSink {
     fn opened_container(&self) -> Option<Container> {
         self.container
     }
+    fn opened_dsd(&self) -> Option<NativeFormat> {
+        self.dsd
+    }
     fn open(&mut self, fmt: PcmFormat) -> Result<()> {
         self.close();
         let container = negotiate_or_refuse(&self.device, fmt, &self.supported)?;
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(AudioError::Io)?;
+        self.open_file()?;
         self.container = Some(container);
         self.fmt = Some(fmt);
-        self.file = Some(std::io::BufWriter::new(file));
+        Ok(())
+    }
+    fn open_dsd(&mut self, fmt: PcmFormat) -> Result<()> {
+        self.close();
+        let d = NativeFormat::ALL
+            .into_iter()
+            .find(|d| self.supported_dsd.contains(d))
+            .ok_or_else(|| refuse(&self.device, "native DSD (no DSD format)".into()))?;
+        self.open_file()?;
+        self.dsd = Some(d);
+        self.fmt = Some(fmt);
         Ok(())
     }
     fn write_i32(&mut self, samples: &[i32]) -> Result<()> {
-        let (Some(file), Some(container), Some(f)) = (&mut self.file, self.container, self.fmt)
-        else {
+        let (Some(file), Some(f)) = (&mut self.file, self.fmt) else {
             return Err(AudioError::UnsupportedSource("sink not open".into()));
         };
         self.bytes.clear();
-        append_container(&mut self.bytes, samples, container, f.bits);
+        match (self.container, self.dsd) {
+            (Some(c), _) => append_container(&mut self.bytes, samples, c, f.bits),
+            (None, Some(d)) => native::append(&mut self.bytes, samples, f.channels as usize, d),
+            (None, None) => return Err(AudioError::UnsupportedSource("sink not open".into())),
+        }
         use std::io::Write;
         file.write_all(&self.bytes).map_err(AudioError::Io)
     }
@@ -371,6 +472,7 @@ impl AudioSink for FileSink {
         }
         self.fmt = None;
         self.container = None;
+        self.dsd = None;
     }
     fn pause(&mut self) -> Result<()> {
         // Make everything written so far observable while paused.
@@ -384,6 +486,7 @@ pub struct NullSink {
     device: DeviceInfo,
     fmt: Option<PcmFormat>,
     container: Option<Container>,
+    dsd: Option<NativeFormat>,
     frames: u64,
 }
 
@@ -393,6 +496,7 @@ impl NullSink {
             device,
             fmt: None,
             container: None,
+            dsd: None,
             frames: 0,
         }
     }
@@ -411,8 +515,19 @@ impl AudioSink for NullSink {
     fn opened_container(&self) -> Option<Container> {
         self.container
     }
+    fn opened_dsd(&self) -> Option<NativeFormat> {
+        self.dsd
+    }
     fn open(&mut self, fmt: PcmFormat) -> Result<()> {
         self.container = Some(negotiate_or_refuse(&self.device, fmt, &Container::ALL)?);
+        self.dsd = None;
+        self.fmt = Some(fmt);
+        self.frames = 0;
+        Ok(())
+    }
+    fn open_dsd(&mut self, fmt: PcmFormat) -> Result<()> {
+        self.container = None;
+        self.dsd = Some(NativeFormat::U32Be);
         self.fmt = Some(fmt);
         self.frames = 0;
         Ok(())
@@ -430,6 +545,7 @@ impl AudioSink for NullSink {
     fn close(&mut self) {
         self.fmt = None;
         self.container = None;
+        self.dsd = None;
     }
 }
 
@@ -452,11 +568,19 @@ mod tests {
     fn file_spec_parsing() {
         assert_eq!(
             parse_file_spec("file:/tmp/a.raw"),
-            ("/tmp/a.raw".to_string(), Container::ALL.to_vec())
+            (
+                "/tmp/a.raw".to_string(),
+                Container::ALL.to_vec(),
+                vec![NativeFormat::U32Be]
+            )
         );
         assert_eq!(
             parse_file_spec("file:/tmp/a.raw?formats=S32_LE,S24_3LE"),
-            ("/tmp/a.raw".to_string(), vec![S32, S24_3])
+            ("/tmp/a.raw".to_string(), vec![S32, S24_3], vec![])
+        );
+        assert_eq!(
+            parse_file_spec("file:/tmp/a.raw?formats=DSD_U16_LE"),
+            ("/tmp/a.raw".to_string(), vec![], vec![NativeFormat::U16Le])
         );
         // Unknown labels: the whole thing is a path.
         assert_eq!(

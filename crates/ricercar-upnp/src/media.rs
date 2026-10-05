@@ -54,6 +54,8 @@ pub fn mime_of(path: &str) -> &'static str {
         "wav" => "audio/wav",
         "aif" | "aiff" | "aifc" => "audio/aiff",
         "ogg" | "oga" | "opus" => "audio/ogg",
+        "dsf" => "audio/x-dsf",
+        "dff" => "audio/x-dff",
         _ => "application/octet-stream",
     }
 }

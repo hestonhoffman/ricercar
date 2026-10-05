@@ -13,7 +13,7 @@ use walkdir::WalkDir;
 use crate::meta::{TagInfo, file_uri, read_tags};
 
 pub const SUPPORTED_EXTS: &[&str] = &[
-    "flac", "wav", "aiff", "aif", "aifc", "mp3", "ogg", "oga", "m4a", "mp4", "alac",
+    "flac", "wav", "aiff", "aif", "aifc", "mp3", "ogg", "oga", "m4a", "mp4", "alac", "dsf", "dff",
 ];
 
 /// Bump with a new step in `schema`: each step upgrades from the version
@@ -2022,6 +2022,83 @@ mod tests {
         let lib = Library::open(&db).unwrap();
         assert_eq!(lib.count(), 1);
         assert_eq!(lib.most_played_tracks(5)[0].play_count, 1);
+    }
+
+    #[test]
+    fn dsf_and_dff_are_indexed_with_tags_and_covers() {
+        use ricercar_audio::dsd::{DsdFormat, fixture, id3};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let al = root.join("Sonatas");
+        std::fs::create_dir_all(&al).unwrap();
+        let f64 = DsdFormat {
+            rate: 2_822_400,
+            channels: 2,
+        };
+        let f128 = DsdFormat {
+            rate: 5_644_800,
+            channels: 2,
+        };
+        let data = fixture::sine(f64, 440.0, 0.4, 0.5);
+        let tags = |t: &str, n: &str| {
+            id3::build(
+                &[
+                    ("title", t),
+                    ("artist", "Ensemble Lumen"),
+                    ("album", "Sonatas"),
+                    ("tracknumber", n),
+                    ("date", "2018-05-01"),
+                    ("genre", "Classical"),
+                ],
+                Some((b"\x89PNG fake cover", "image/png")),
+            )
+        };
+        std::fs::write(
+            al.join("01.dsf"),
+            fixture::dsf(f64, &data, &tags("Allegro", "1/3")),
+        )
+        .unwrap();
+        std::fs::write(
+            al.join("02.dff"),
+            fixture::dff(f128, &data, &tags("Adagio", "2/3"), ""),
+        )
+        .unwrap();
+        std::fs::write(
+            al.join("03.dff"),
+            fixture::dff_dst(f64, &data, &tags("Presto", "3/3"), fixture::dst_plain_frame),
+        )
+        .unwrap();
+        let lib = Library::open(&dir.path().join("db/lib.db")).unwrap();
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!(r.added, 3);
+        let tracks = lib.tracks(TrackSort::Title);
+        let by = |t: &str| tracks.iter().find(|x| x.title == t).unwrap().clone();
+        let a = by("Allegro");
+        assert_eq!(a.artist.as_deref(), Some("Ensemble Lumen"));
+        assert_eq!(a.album.as_deref(), Some("Sonatas"));
+        assert_eq!((a.track, a.year), (Some(1), Some(2018)));
+        assert_eq!(a.genre.as_deref(), Some("Classical"));
+        assert_eq!((a.sample_rate, a.bits), (Some(2_822_400), Some(1)));
+        assert_eq!(a.codec.as_deref(), Some("DSF"));
+        assert_eq!(a.duration_ms, 500);
+        assert!(a.is_hires());
+        let b = by("Adagio");
+        assert_eq!(
+            (b.codec.as_deref(), b.sample_rate),
+            (Some("DFF"), Some(5_644_800))
+        );
+        assert_eq!(b.duration_ms, 250);
+        let c = by("Presto");
+        assert_eq!(c.codec.as_deref(), Some("DST"));
+        // Whole DST frames: 0.5 s rounded up to 1/75 s.
+        assert_eq!(c.duration_ms, 506);
+        let al = &lib.albums(AlbumSort::Title)[0];
+        assert_eq!((al.title.as_str(), al.track_count), ("Sonatas", 3));
+        let cover = crate::meta::cover_bytes(Path::new(&a.path)).unwrap();
+        assert_eq!(
+            cover,
+            (b"\x89PNG fake cover".to_vec(), "image/png".to_string())
+        );
     }
 
     #[test]

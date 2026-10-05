@@ -1,5 +1,6 @@
 //! User configuration (`$XDG_CONFIG_HOME/ricercar/config.toml`) and XDG paths.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,30 @@ pub enum ReplayGain {
     Auto,
 }
 
+/// How DSD files reach one output (`[audio.dsd]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DsdOutput {
+    /// Converted to 24-bit PCM: safe everywhere, not bit-perfect.
+    #[default]
+    Pcm,
+    /// DSD over PCM, for DACs that decode it.
+    Dop,
+    /// ALSA DSD sample formats, when the driver offers them.
+    Native,
+}
+
+impl DsdOutput {
+    pub fn mode(self) -> ricercar_audio::dsd::DsdMode {
+        use ricercar_audio::dsd::DsdMode;
+        match self {
+            DsdOutput::Pcm => DsdMode::Pcm,
+            DsdOutput::Dop => DsdMode::Dop,
+            DsdOutput::Native => DsdMode::Native,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
@@ -64,6 +89,18 @@ pub struct AudioConfig {
     /// Keep the volume at 100 % and unmuted, and ignore every volume or
     /// mute change (UI, network control points, MPRIS, plugins).
     pub fixed_volume: bool,
+    /// `[audio.dsd]`: DSD output per device name, e.g. `"hw:3,0" = "dop"`.
+    /// Devices not listed convert DSD to PCM. DoP and native only ever
+    /// apply to `hw:` devices.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub dsd: BTreeMap<String, DsdOutput>,
+}
+
+impl AudioConfig {
+    /// DSD output for `device` (PCM unless chosen for it).
+    pub fn dsd_for(&self, device: &str) -> DsdOutput {
+        self.dsd.get(device).copied().unwrap_or_default()
+    }
 }
 
 impl Default for AudioConfig {
@@ -75,6 +112,7 @@ impl Default for AudioConfig {
             restore_session: true,
             continuous_playback: false,
             fixed_volume: false,
+            dsd: BTreeMap::new(),
         }
     }
 }
@@ -362,6 +400,25 @@ mod tests {
         assert_eq!(c.audio.device, "default");
         assert!(!c.audio.fixed_volume);
         assert_eq!(c.network.name, "ricercar");
+    }
+
+    #[test]
+    fn dsd_output_per_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        let mut c = Config::default();
+        c.save(&p).unwrap();
+        assert!(!text_of(&p).contains("dsd"), "nothing chosen: not written");
+        c.audio.dsd.insert("hw:3,0".into(), DsdOutput::Dop);
+        c.audio.dsd.insert("hw:1,0".into(), DsdOutput::Native);
+        c.save(&p).unwrap();
+        assert!(text_of(&p).contains("[audio.dsd]"));
+        assert!(text_of(&p).contains("\"hw:3,0\" = \"dop\""));
+        assert_eq!(Config::load(&p), c);
+        assert_eq!(c.audio.dsd_for("hw:3,0"), DsdOutput::Dop);
+        assert_eq!(c.audio.dsd_for("default"), DsdOutput::Pcm);
+        std::fs::write(&p, "[audio.dsd]\n\"hw:0,0\" = \"native\"\n").unwrap();
+        assert_eq!(Config::load(&p).audio.dsd_for("hw:0,0"), DsdOutput::Native);
     }
 
     #[test]

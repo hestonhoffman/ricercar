@@ -7,7 +7,7 @@ Everything a newcomer needs to implement a feature end to end. Read
 
 | Crate | Role | Key entry points |
 |---|---|---|
-| `ricercar-audio` | Decoding (symphonia), ALSA output, gapless, ReplayGain, HTTP streaming | `PlayerHandle` (`player.rs`), `device.rs` (`list_devices`, `probe_device`), `sink.rs` (`null` / `file:` sinks) |
+| `ricercar-audio` | Decoding (symphonia), DSD (`dsd/`), ALSA output, gapless, ReplayGain, HTTP streaming | `PlayerHandle` (`player.rs`), `device.rs` (`list_devices`, `probe_device`), `sink.rs` (`null` / `file:` sinks) |
 | `ricercar-core` | Library (SQLite + FTS5), queue controller, config, covers, file watcher | `Library` (`library.rs`), `Controller` / `CtlEvent` / `CtlState` / `QueueItem` (`controller.rs`), `Config` + XDG paths (`config.rs`), `CoverCache` (`covers.rs`) |
 | `ricercar-upnp` | UPnP AV + OpenHome renderer, MediaServer, SSDP, GENA | `start_with`, `RendererHandle` (`lib.rs`), one file per service |
 | `ricercar-mpris` | MPRIS D-Bus server (zbus) | `lib.rs` |
@@ -64,6 +64,32 @@ indexes):
   serves each as a WAV of exactly its samples (decoded on the fly, no
   Range requests). The signal path's Source hop says `CUE track <n>`.
   Embedded sheets (a `CUESHEET` tag) are not read.
+
+### DSD
+
+`ricercar-audio/src/dsd/` plays DSF and DFF files:
+
+- `source.rs`: the `DsdSource` trait every reader implements (shared
+  contract: interleaved bytes, MSB first, positions in bytes per channel).
+  `dsf.rs`, `dff.rs` (plain and DST, through `dst-decoder`; the
+  `FrameDecoder` trait lets tests stand in for it) and `id3.rs` (tags and
+  cover) read files; `probe` gives the library format, length and tags.
+- `play.rs`: `DsdPlayback` turns any `Box<dyn DsdSource>` into the engine's
+  i32 samples for a `DsdMode`: DoP payloads (`dop.rs`, 16 bits per
+  channel), native 32-bit words (`native.rs`), or PCM through the
+  decimator (`pcm.rs`, filter design documented there).
+- `TrackSource::open_with(uri, mode)` picks it for `.dsf` / `.dff`. Its
+  `wire()` (`fmt::Wire`: `Pcm`, `Dop`, `NativeDsd`) tells the engine how to
+  open the sink (`open` or `open_dsd`), whether to apply gain (never for
+  DoP and native) and to set the DoP markers (`dop::mark`, alternation
+  kept across tracks). Sinks split native words into the ALSA DSD format
+  they negotiated; `file:` takes `?formats=DSD_U16_LE,…` to emulate a DAC.
+- The mode comes from `[audio.dsd]` per device name (`Controller::
+  set_dsd_modes`, `PlayerHandle::set_dsd_mode`), and `DsdMode::guarded`
+  turns DoP and native into PCM on any shared device. `ChainInfo::dsd`
+  feeds the signal path.
+- `dsd::fixture` writes DSF and DFF files from a sigma-delta modulator
+  (tests, `examples/dsd_tone.rs` for the demo library).
 
 ## The UI crate
 

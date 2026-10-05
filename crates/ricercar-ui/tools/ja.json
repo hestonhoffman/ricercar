@@ -437,5 +437,17 @@
 "PipeWire default output": "PipeWire の既定の出力",
 "PipeWire default output; {device} not connected": "PipeWire の既定の出力。{device} は未接続",
 "NOT CONNECTED": "未接続",
-"CUE track {n}": "CUE トラック {n}"
+"CUE track {n}": "CUE トラック {n}",
+"DSD": "DSD",
+"DSD output": "DSD 出力",
+"Convert to PCM": "PCM に変換",
+"DoP": "DoP",
+"Native": "ネイティブ",
+"Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.": "「PCM に変換」はどこでも DSD ファイルを再生できますが、ビットパーフェクトではありません。DoP とネイティブは DSD のビットをそのまま固定音量で送ります。DoP は DAC が対応している場合のみ選んでください。DSD 非対応の DAC では大きなノイズになります。",
+"DSD: DoP": "DSD: DoP",
+"DSD: NATIVE": "DSD: ネイティブ",
+"DoP {rate} kHz / 24-bit → DAC": "DoP {rate} kHz / 24 ビット → DAC",
+"Native DSD ({format}) → DAC": "ネイティブ DSD（{format}）→ DAC",
+"Converted to PCM 24-bit / {rate} kHz, not bit-perfect": "PCM 24 ビット / {rate} kHz に変換（ビットパーフェクトではありません）",
+"Bypassed for DSD: volume, mute and ReplayGain do not apply": "DSD では無効：音量、ミュート、ReplayGain は適用されません"
 }

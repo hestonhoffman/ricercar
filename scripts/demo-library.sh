@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Builds the synthetic demo library used by the headless screenshot tour
 # (RICERCAR_SNAPSHOT) and for manual testing: 12 albums, 59 short FLAC tracks
-# of sine tones at various rates/depths, generated covers, one .lrc file, and
-# a 13th album ripped as one FLAC file with a .cue sheet (4 tracks).
+# of sine tones at various rates/depths, generated covers, one .lrc file, a
+# 13th album ripped as one FLAC file with a .cue sheet (4 tracks), and a 14th
+# in DSD64 (two DSF files and one DFF).
 #
 #   scripts/demo-library.sh <out-dir>
 #
-# Needs ffmpeg and ImageMagick 7 (`magick`). The album, artist and playlist
+# Needs ffmpeg, ImageMagick 7 (`magick`) and cargo (for the DSD files). The album, artist and playlist
 # names are referenced by crates/ricercar-ui/src/snapshot.rs: keep them in sync.
 set -euo pipefail
 
 D=${1:?usage: $0 <out-dir>}
-for bin in ffmpeg magick; do
+for bin in ffmpeg magick cargo; do
   command -v "$bin" >/dev/null || { echo "missing: $bin" >&2; exit 1; }
 done
 rm -rf "$D"
@@ -80,6 +81,23 @@ printf '%s\r\n' 'REM GENRE Jazz' 'REM DATE 2015' 'REM COMMENT "ricercar demo"' \
   '  TRACK 04 AUDIO' '    TITLE "Long Goodbye"' '    PERFORMER "Hana Ito & Friends"' \
   '    INDEX 01 01:10:00' > "$dir/Live in One Take.cue"
 n=$((n + 4))
+
+# DSD64: sigma-delta sine tones written by an example of ricercar-audio.
+dir="$D/Ensemble Lumen/Pure Fifths"
+mkdir -p "$dir"
+magick -size 600x600 -seed 33 "plasma:hsl(45,70%,45%)-hsl(260,60%,20%)" \
+  -blur 0x6 -swirl 200 -fill "rgba(255,255,255,0.85)" -pointsize 44 \
+  -gravity southwest -annotate +36+40 "Pure Fifths" "$dir/cover.jpg" </dev/null
+root=$(cd "$(dirname "$0")/.." && pwd)
+t=1
+for spec in "220|Open Fifth|dsf" "330|Drone in A|dsf" "440|Pure Tone|dff"; do
+  IFS='|' read -r f title ext <<< "$spec"
+  cargo run -q --manifest-path "$root/Cargo.toml" -p ricercar-audio --example dsd_tone -- \
+    "$dir/$(printf %02d $t) $title.$ext" "$f" 20 \
+    title="$title" artist="Ensemble Lumen" albumartist="Ensemble Lumen" \
+    album="Pure Fifths" date=2021 genre=Classical tracknumber=$t
+  t=$((t + 1)); n=$((n + 1))
+done
 
 printf '[00:02.00]First line of a synthetic lyric\n[00:06.00]Second line, a little longer than the first\n[00:10.50]Third line\n[00:15.00]\n[00:17.00]The chorus comes back again\n[00:22.00]And fades out slowly\n' \
   > "$D/Kaito Mori/Neon Rain/01 Neon Rain.lrc"
