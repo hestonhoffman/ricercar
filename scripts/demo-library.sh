@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the synthetic demo library used by the headless screenshot tour
 # (RICERCAR_SNAPSHOT) and for manual testing: 12 albums, 59 short FLAC tracks
-# of sine tones at various rates/depths, generated covers, one .lrc file.
+# of sine tones at various rates/depths, generated covers, one .lrc file, and
+# a 13th album ripped as one FLAC file with a .cue sheet (4 tracks).
 #
 #   scripts/demo-library.sh <out-dir>
 #
@@ -54,6 +55,31 @@ while IFS=$'\t' read -r ar al y g sr b tr idx; do
     t=$((t + 1)); n=$((n + 1))
   done
 done <<< "$plan"
+
+# One file for the whole album, cut into tracks by its cue sheet. The file
+# carries the album tags only; titles come from the sheet.
+dir="$D/Hana Ito/Live in One Take"
+mkdir -p "$dir"
+magick -size 600x600 -seed 21 "plasma:hsl(200,70%,45%)-hsl(340,60%,20%)" \
+  -blur 0x6 -swirl 120 -fill "rgba(255,255,255,0.85)" -pointsize 44 \
+  -gravity southwest -annotate +36+40 "Live in One Take" "$dir/cover.jpg" </dev/null
+ffmpeg -nostdin -loglevel error \
+  -f lavfi -i "sine=frequency=262:sample_rate=44100:duration=24" \
+  -f lavfi -i "sine=frequency=330:sample_rate=44100:duration=26" \
+  -f lavfi -i "sine=frequency=392:sample_rate=44100:duration=20" \
+  -f lavfi -i "sine=frequency=523:sample_rate=44100:duration=35" \
+  -filter_complex "[0][1][2][3]concat=n=4:v=0:a=1,volume=0.2" -ac 2 -sample_fmt s16 \
+  -metadata artist="Hana Ito" -metadata album_artist="Hana Ito" \
+  -metadata album="Live in One Take" -metadata date="2015" -metadata genre="Jazz" \
+  "$dir/Live in One Take.flac"
+printf '%s\r\n' 'REM GENRE Jazz' 'REM DATE 2015' 'REM COMMENT "ricercar demo"' \
+  'PERFORMER "Hana Ito"' 'TITLE "Live in One Take"' 'FILE "Live in One Take.wav" WAVE' \
+  '  TRACK 01 AUDIO' '    TITLE "Opening"' '    INDEX 01 00:00:00' \
+  '  TRACK 02 AUDIO' '    TITLE "Second Wind"' '    INDEX 01 00:24:00' \
+  '  TRACK 03 AUDIO' '    TITLE "Café Interlude"' '    INDEX 00 00:50:00' '    INDEX 01 00:52:00' \
+  '  TRACK 04 AUDIO' '    TITLE "Long Goodbye"' '    PERFORMER "Hana Ito & Friends"' \
+  '    INDEX 01 01:10:00' > "$dir/Live in One Take.cue"
+n=$((n + 4))
 
 printf '[00:02.00]First line of a synthetic lyric\n[00:06.00]Second line, a little longer than the first\n[00:10.50]Third line\n[00:15.00]\n[00:17.00]The chorus comes back again\n[00:22.00]And fades out slowly\n' \
   > "$D/Kaito Mori/Neon Rain/01 Neon Rain.lrc"

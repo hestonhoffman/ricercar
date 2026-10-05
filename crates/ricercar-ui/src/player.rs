@@ -591,6 +591,16 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         (Some(c), None) => c.to_string(),
         _ => "—".into(),
     };
+    // A track cut from a whole-disc file by its cue sheet.
+    let cue = info
+        .path
+        .as_deref()
+        .and_then(ricercar_core::cue::split_key)
+        .map(|(_, n)| tf("CUE track {n}", &[("n", &n.to_string())]));
+    let src_val = match cue {
+        Some(c) => format!("{src_val} · {c}"),
+        None => src_val,
+    };
     hops.push(ChainHop {
         label: if plugin.is_some() {
             t("Stream")

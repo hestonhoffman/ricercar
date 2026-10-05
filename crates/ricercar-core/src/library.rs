@@ -18,7 +18,7 @@ pub const SUPPORTED_EXTS: &[&str] = &[
 
 /// Bump with a new step in `schema`: each step upgrades from the version
 /// before it and must keep user data (stats, playlists, `added_at`...).
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 pub fn now_unix() -> i64 {
     std::time::SystemTime::now()
@@ -330,6 +330,14 @@ fn schema(conn: &Connection) -> rusqlite::Result<()> {
     if !history_info {
         conn.execute_batch("ALTER TABLE history ADD COLUMN info TEXT")?;
     }
+    // v3: tracks cut from one audio file by a cue sheet (see `cue`).
+    if version < 3 {
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN cue_start INTEGER;
+             ALTER TABLE tracks ADD COLUMN cue_end INTEGER;
+             ALTER TABLE tracks ADD COLUMN cue_sheet TEXT;",
+        )?;
+    }
     // Later steps go here, as `if version < N { ... }`.
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -369,12 +377,26 @@ const TRACK_COLS: &str =
     "t.path, t.title, t.artist, t.album_artist, t.album, t.album_id, t.track, t.disc,
     t.year, t.genre, t.composer, t.duration_ms, t.sample_rate, t.bits, t.channels, t.bitrate,
     t.codec, t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, t.mb_album_id,
-    COALESCE(s.favorite, 0), COALESCE(s.play_count, 0)";
+    COALESCE(s.favorite, 0), COALESCE(s.play_count, 0), t.cue_start, t.cue_end";
+/// Number of columns in `TRACK_COLS`.
+const TRACK_NCOLS: usize = 26;
+
+/// The URI the engine plays: a cue track is its span of the audio file.
+fn track_uri(path: &str, cue_start: Option<i64>, cue_end: Option<i64>) -> String {
+    match cue_start {
+        Some(start) => format!(
+            "{}{}",
+            file_uri(Path::new(crate::cue::file_of(path))),
+            crate::cue::fragment(start.max(0) as u64, cue_end.map(|e| e.max(0) as u64))
+        ),
+        None => file_uri(Path::new(path)),
+    }
+}
 
 fn row_to_track(r: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
     let path: String = r.get(0)?;
     Ok(Track {
-        uri: file_uri(Path::new(&path)),
+        uri: track_uri(&path, r.get(24)?, r.get(25)?),
         path,
         title: r.get(1)?,
         artist: r.get(2)?,
@@ -500,6 +522,77 @@ struct Scanned {
     mtime: i64,
 }
 
+/// An audio file cut into tracks by a cue sheet.
+struct CueJob {
+    audio: PathBuf,
+    size: i64,
+    /// Latest of the audio file's and the sheet's.
+    mtime: i64,
+    sheet_path: PathBuf,
+    sheet: std::sync::Arc<crate::cue::CueSheet>,
+    /// Index of the audio file in the sheet's `FILE` entries.
+    file: usize,
+}
+
+impl CueJob {
+    /// (key, size, track index) of each track; the file size is counted
+    /// once, on its first track.
+    fn keys(&self) -> Vec<(String, i64, usize)> {
+        self.sheet
+            .tracks_of(self.file)
+            .enumerate()
+            .map(|(n, (i, t))| {
+                let size = if n == 0 { self.size } else { 0 };
+                (crate::cue::key(&self.audio, t.number), size, i)
+            })
+            .collect()
+    }
+}
+
+fn mtime_of(md: &std::fs::Metadata) -> i64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Audio files described by the cue sheets found in a scan, each by the
+/// first sheet (in path order) that cuts it into two tracks or more.
+fn cue_jobs(sheets: &mut [(PathBuf, i64)], audio: &HashMap<PathBuf, (i64, i64)>) -> Vec<CueJob> {
+    sheets.sort();
+    let mut jobs: Vec<CueJob> = Vec::new();
+    for (sheet_path, sheet_mtime) in sheets.iter() {
+        let Some(sheet) = crate::cue::read(sheet_path) else {
+            continue;
+        };
+        let sheet = std::sync::Arc::new(sheet);
+        for (file, name) in sheet.files.iter().enumerate() {
+            if sheet.tracks_of(file).count() < 2 {
+                continue;
+            }
+            let Some(path) = crate::cue::resolve_file(sheet_path, name, SUPPORTED_EXTS) else {
+                continue;
+            };
+            let Some(&(size, mtime)) = audio.get(&path) else {
+                continue;
+            };
+            if jobs.iter().any(|j| j.audio == path) {
+                continue;
+            }
+            jobs.push(CueJob {
+                audio: path,
+                size,
+                mtime: mtime.max(*sheet_mtime),
+                sheet_path: sheet_path.clone(),
+                sheet: sheet.clone(),
+                file,
+            });
+        }
+    }
+    jobs
+}
+
 impl Library {
     pub fn open(path: &Path) -> rusqlite::Result<Library> {
         if let Some(parent) = path.parent() {
@@ -598,7 +691,8 @@ impl Library {
             .into_iter()
             .collect();
         let mut seen: HashSet<String> = HashSet::new();
-        let mut todo: Vec<Scanned> = Vec::new();
+        let mut found: Vec<Scanned> = Vec::new();
+        let mut sheets: Vec<(PathBuf, i64)> = Vec::new();
         let mut report = ScanReport::default();
         let mut live_roots: Vec<PathBuf> = Vec::new();
         // Directories the walk could not read: what is under them is kept.
@@ -624,34 +718,61 @@ impl Library {
                     continue;
                 }
                 let path = entry.path();
-                let ok_ext = path
+                let ext = path
                     .extension()
                     .and_then(|e| e.to_str())
-                    .is_some_and(|e| SUPPORTED_EXTS.contains(&e.to_ascii_lowercase().as_str()));
-                if !ok_ext {
+                    .map(|e| e.to_ascii_lowercase());
+                let Some(ext) = ext else { continue };
+                let is_sheet = ext == "cue";
+                if !is_sheet && !SUPPORTED_EXTS.contains(&ext.as_str()) {
                     continue;
                 }
-                let key = path.to_string_lossy().into_owned();
                 let Ok(md) = entry.metadata() else { continue };
-                let size = md.len() as i64;
-                let mtime = md
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                if known.get(&key) != Some(&(size, mtime)) {
-                    todo.push(Scanned {
-                        path: path.to_path_buf(),
-                        size,
-                        mtime,
-                    });
+                if is_sheet {
+                    sheets.push((path.to_path_buf(), mtime_of(&md)));
+                    continue;
                 }
+                found.push(Scanned {
+                    path: path.to_path_buf(),
+                    size: md.len() as i64,
+                    mtime: mtime_of(&md),
+                });
+            }
+        }
+
+        let by_path: HashMap<PathBuf, (i64, i64)> = found
+            .iter()
+            .map(|s| (s.path.clone(), (s.size, s.mtime)))
+            .collect();
+        let jobs = cue_jobs(&mut sheets, &by_path);
+        let cut: HashSet<&Path> = jobs.iter().map(|j| j.audio.as_path()).collect();
+        let mut todo: Vec<Scanned> = Vec::new();
+        for s in found {
+            // An audio file cut by a cue sheet is listed as its tracks only.
+            if cut.contains(s.path.as_path()) {
+                continue;
+            }
+            let key = s.path.to_string_lossy().into_owned();
+            if known.get(&key) != Some(&(s.size, s.mtime)) {
+                todo.push(s);
+            }
+            seen.insert(key);
+        }
+        let mut cue_todo: Vec<&CueJob> = Vec::new();
+        for job in &jobs {
+            let mut changed = false;
+            for (key, size, _) in job.keys() {
+                changed |= known.get(&key) != Some(&(size, job.mtime));
                 seen.insert(key);
+            }
+            if changed {
+                cue_todo.push(job);
             }
         }
         report.total = seen.len();
-        self.progress.total.store(todo.len(), Ordering::Relaxed);
+        self.progress
+            .total
+            .store(todo.len() + cue_todo.len(), Ordering::Relaxed);
 
         for chunk in todo.chunks(256) {
             let tagged: Vec<(&Scanned, TagInfo)> =
@@ -659,7 +780,7 @@ impl Library {
             let mut conn = self.w();
             let Ok(tx) = conn.transaction() else { break };
             for (s, tags) in &tagged {
-                match upsert_tags(&tx, &s.path, tags, s.size, s.mtime) {
+                match upsert_tags(&tx, &s.path, tags, s.size, s.mtime, None) {
                     Ok(true) => report.added += 1,
                     Ok(false) => report.updated += 1,
                     Err(e) => tracing::warn!("index {}: {e}", s.path.display()),
@@ -669,6 +790,33 @@ impl Library {
             drop(conn);
             self.progress.done.fetch_add(chunk.len(), Ordering::Relaxed);
             // Let views pick up big libraries progressively.
+            self.touch();
+        }
+
+        for chunk in cue_todo.chunks(64) {
+            let tagged: Vec<(&CueJob, TagInfo)> = chunk
+                .par_iter()
+                .map(|j| (*j, read_tags(&j.audio)))
+                .collect();
+            let mut conn = self.w();
+            let Ok(tx) = conn.transaction() else { break };
+            for (job, file_tags) in &tagged {
+                let spans = job.sheet.spans();
+                let sheet = job.sheet_path.to_string_lossy();
+                for (key, size, i) in job.keys() {
+                    let span = spans[i];
+                    let tags = crate::cue::track_tags(&job.sheet, i, span, file_tags);
+                    let cue = Some((span.start, span.end, sheet.as_ref()));
+                    match upsert_tags(&tx, Path::new(&key), &tags, size, job.mtime, cue) {
+                        Ok(true) => report.added += 1,
+                        Ok(false) => report.updated += 1,
+                        Err(e) => tracing::warn!("index {key}: {e}"),
+                    }
+                }
+            }
+            let _ = tx.commit();
+            drop(conn);
+            self.progress.done.fetch_add(chunk.len(), Ordering::Relaxed);
             self.touch();
         }
 
@@ -702,7 +850,7 @@ impl Library {
         let mut conn = self.w();
         if let Ok(tx) = conn.transaction() {
             for (path, tags, size, mtime) in items {
-                if upsert_tags(&tx, path, tags, *size, *mtime).unwrap_or(false) {
+                if upsert_tags(&tx, path, tags, *size, *mtime, None).unwrap_or(false) {
                     added += 1;
                 }
             }
@@ -718,13 +866,8 @@ impl Library {
         let tags = read_tags(path);
         let md = std::fs::metadata(path).ok();
         let size = md.as_ref().map(|m| m.len() as i64).unwrap_or(0);
-        let mtime = md
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        let res = upsert_tags(&self.w(), path, &tags, size, mtime);
+        let mtime = md.as_ref().map(mtime_of).unwrap_or(0);
+        let res = upsert_tags(&self.w(), path, &tags, size, mtime, None);
         self.touch();
         res.unwrap_or(false)
     }
@@ -1302,7 +1445,7 @@ impl Library {
                 if r.get::<_, Option<String>>(0)?.is_some() {
                     return row_to_track(r).map(Some);
                 }
-                let info: Option<String> = r.get(24)?;
+                let info: Option<String> = r.get(TRACK_NCOLS)?;
                 Ok(info
                     .and_then(|j| serde_json::from_str::<crate::controller::TrackInfo>(&j).ok())
                     .filter(|i| crate::plugin::is_plugin_uri(&i.uri))
@@ -1448,6 +1591,12 @@ impl Library {
             .into_iter()
             .filter(|t| !t.is_plugin())
         {
+            // Other players cannot play part of a file: a cue track is a
+            // comment they skip, which `import_m3u` reads back.
+            if crate::cue::split_key(&t.path).is_some() {
+                out.push_str(&format!("{CUE_M3U}{}\n", t.path));
+                continue;
+            }
             out.push_str(&format!(
                 "#EXTINF:{},{} - {}\n{}\n",
                 t.duration_ms / 1000,
@@ -1466,12 +1615,15 @@ impl Library {
         let paths: Vec<String> = text
             .lines()
             .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .filter(|l| !l.is_empty() && (!l.starts_with('#') || l.starts_with(CUE_M3U)))
             .map(|l| {
+                if let Some(key) = l.strip_prefix(CUE_M3U) {
+                    return key.to_string();
+                }
                 let p = crate::meta::uri_to_path(l).unwrap_or_else(|| PathBuf::from(l));
-                if p.is_absolute() { p } else { base.join(p) }
+                let p = if p.is_absolute() { p } else { base.join(p) };
+                p.to_string_lossy().into_owned()
             })
-            .map(|p| p.to_string_lossy().into_owned())
             .filter(|p| self.has_path(p))
             .collect();
         let name = src
@@ -1484,13 +1636,21 @@ impl Library {
     }
 }
 
-/// Returns Ok(true) when the row is new.
+/// M3U comment line holding a cue track's library key.
+const CUE_M3U: &str = "#RICERCAR-CUE:";
+
+/// Span of a cue track in its audio file (frames) and the sheet's path.
+type CueCols<'a> = (u64, Option<u64>, &'a str);
+
+/// Returns Ok(true) when the row is new. `path` is the library key (that
+/// of a cue track for `cue`).
 fn upsert_tags(
     conn: &Connection,
     path: &Path,
     tags: &TagInfo,
     size: i64,
     mtime: i64,
+    cue: Option<CueCols<'_>>,
 ) -> rusqlite::Result<bool> {
     let key = path.to_string_lossy();
     let existed = conn
@@ -1505,13 +1665,13 @@ fn upsert_tags(
         "INSERT INTO tracks (path, dir, title, artist, album_artist, album, album_id, track, disc,
             year, genre, composer, duration_ms, sample_rate, bits, channels, bitrate, codec,
             rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, mb_album_id, mb_track_id,
-            size, mtime, added_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)
+            size, mtime, added_at, cue_start, cue_end, cue_sheet)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)
          ON CONFLICT(path) DO UPDATE SET dir=?2, title=?3, artist=?4, album_artist=?5, album=?6,
             album_id=?7, track=?8, disc=?9, year=?10, genre=?11, composer=?12, duration_ms=?13,
             sample_rate=?14, bits=?15, channels=?16, bitrate=?17, codec=?18, rg_track_gain=?19,
             rg_track_peak=?20, rg_album_gain=?21, rg_album_peak=?22, mb_album_id=?23,
-            mb_track_id=?24, size=?25, mtime=?26",
+            mb_track_id=?24, size=?25, mtime=?26, cue_start=?28, cue_end=?29, cue_sheet=?30",
         params![
             key,
             dir,
@@ -1540,6 +1700,9 @@ fn upsert_tags(
             size,
             mtime,
             now_unix(),
+            cue.map(|c| c.0 as i64),
+            cue.and_then(|c| c.1).map(|e| e as i64),
+            cue.map(|c| c.2),
         ],
     )?;
     Ok(!existed)
@@ -1567,7 +1730,7 @@ mod tests {
     fn lib_with(rows: &[(&str, TagInfo)]) -> Library {
         let lib = Library::in_memory().unwrap();
         for (p, t) in rows {
-            upsert_tags(&lib.w(), Path::new(p), t, 1, 1).unwrap();
+            upsert_tags(&lib.w(), Path::new(p), t, 1, 1, None).unwrap();
         }
         lib
     }
@@ -1657,6 +1820,7 @@ mod tests {
             ),
             2,
             2,
+            None,
         )
         .unwrap();
         assert!(lib.search("what").tracks.is_empty());
@@ -1884,5 +2048,222 @@ mod tests {
         let a = &lib.albums(AlbumSort::Title)[0];
         assert_eq!(a.title, "al");
         assert_eq!(lib.retain_roots(&[]), 1);
+    }
+    /// A 16-bit mono WAV of silence with RIFF INFO tags.
+    fn write_wav(path: &Path, secs: u32, info: &[(&[u8; 4], &str)]) {
+        let rate = 44_100u32;
+        let data_len = rate * secs * 2;
+        let mut list = b"INFO".to_vec();
+        for (id, v) in info {
+            let mut v = v.as_bytes().to_vec();
+            v.push(0);
+            if v.len() % 2 == 1 {
+                v.push(0);
+            }
+            list.extend(*id);
+            list.extend((v.len() as u32).to_le_bytes());
+            list.extend(v);
+        }
+        let mut f = b"RIFF".to_vec();
+        f.extend((4 + 24 + 8 + list.len() as u32 + 8 + data_len).to_le_bytes());
+        f.extend(b"WAVEfmt ");
+        f.extend(16u32.to_le_bytes());
+        f.extend(1u16.to_le_bytes());
+        f.extend(1u16.to_le_bytes());
+        f.extend(rate.to_le_bytes());
+        f.extend((rate * 2).to_le_bytes());
+        f.extend(2u16.to_le_bytes());
+        f.extend(16u16.to_le_bytes());
+        f.extend(b"LIST");
+        f.extend((list.len() as u32).to_le_bytes());
+        f.extend(list);
+        f.extend(b"data");
+        f.extend(data_len.to_le_bytes());
+        f.resize(f.len() + data_len as usize, 0);
+        std::fs::write(path, f).unwrap();
+    }
+
+    /// Give a file a new mtime, a few seconds later than before.
+    fn bump_mtime(path: &Path, secs: u64) {
+        let f = std::fs::File::options().write(true).open(path).unwrap();
+        let t = f.metadata().unwrap().modified().unwrap();
+        f.set_modified(t + std::time::Duration::from_secs(secs))
+            .unwrap();
+    }
+
+    const CUE: &str = "REM DATE 1999\r\nPERFORMER \"Disc Artist\"\r\nTITLE \"Disc Title\"\r\n\
+        FILE \"album.flac\" WAVE\r\n  TRACK 01 AUDIO\r\n    TITLE \"One\"\r\n\
+        PERFORMER \"Guest\"\r\n    INDEX 01 00:00:00\r\n  TRACK 02 AUDIO\r\n    TITLE \"Two\"\r\n\
+        INDEX 00 00:01:50\r\n    INDEX 01 00:02:00\r\n  TRACK 03 AUDIO\r\n\
+        INDEX 01 00:04:15\r\n";
+
+    fn cue_rig() -> (tempfile::TempDir, PathBuf, Library) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("music");
+        std::fs::create_dir_all(root.join("al")).unwrap();
+        // The sheet names the FLAC it was ripped to; the file is a WAV.
+        write_wav(
+            &root.join("al/album.wav"),
+            6,
+            &[
+                (b"IART", "File Artist"),
+                (b"IPRD", "File Album"),
+                (b"IGNR", "FileGenre"),
+            ],
+        );
+        std::fs::write(root.join("al/album.cue"), CUE).unwrap();
+        let lib = Library::open(&dir.path().join("db/lib.db")).unwrap();
+        (dir, root, lib)
+    }
+
+    #[test]
+    fn cue_sheet_cuts_its_audio_file_into_tracks() {
+        let (_dir, root, lib) = cue_rig();
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.added, r.total), (3, 3));
+        let audio = root.join("al/album.wav");
+        assert!(
+            !lib.has_path(&audio.to_string_lossy()),
+            "the file itself is hidden"
+        );
+        let albums = lib.albums(AlbumSort::Title);
+        assert_eq!(albums.len(), 1);
+        let al = &albums[0];
+        assert_eq!(
+            (al.title.as_str(), al.artist.as_str()),
+            ("Disc Title", "Disc Artist")
+        );
+        assert_eq!(al.year, Some(1999));
+        assert_eq!(
+            al.genre.as_deref(),
+            Some("FileGenre"),
+            "gaps filled from the file"
+        );
+        assert_eq!(al.duration_ms, 6000);
+        let t = lib.album_tracks(&al.id);
+        let show: Vec<_> = t
+            .iter()
+            .map(|t| {
+                (
+                    t.track,
+                    t.title.as_str(),
+                    t.artist.as_deref(),
+                    t.duration_ms,
+                )
+            })
+            .collect();
+        assert_eq!(
+            show,
+            [
+                (Some(1), "One", Some("Guest"), 2000),
+                (Some(2), "Two", Some("Disc Artist"), 2200),
+                (Some(3), "Track 03", Some("Disc Artist"), 1800),
+            ]
+        );
+        let base = file_uri(&audio);
+        assert_eq!(t[0].path, format!("{}#cue=1", audio.display()));
+        assert_eq!(t[0].uri, format!("{base}#t=0,2"));
+        assert_eq!(t[1].uri, format!("{base}#t=2,4.2"));
+        assert_eq!(t[2].uri, format!("{base}#t=4.2"));
+        assert_eq!(lib.search("two").tracks.len(), 1);
+        // Size counted once.
+        assert_eq!(
+            lib.stats().size_bytes,
+            std::fs::metadata(&audio).unwrap().len()
+        );
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.added, r.updated, r.removed), (0, 0, 0));
+    }
+
+    #[test]
+    fn editing_or_removing_the_cue_sheet_updates_its_tracks() {
+        let (_dir, root, lib) = cue_rig();
+        lib.scan_roots(std::slice::from_ref(&root));
+        let two = format!("{}#cue=2", root.join("al/album.wav").display());
+        lib.record_play(&two);
+        lib.set_favorite(&two, true);
+        let pid = lib.create_playlist("p");
+        lib.add_to_playlist(pid, std::slice::from_ref(&two));
+
+        // Track 3 dropped, track 2 renamed.
+        let sheet = root.join("al/album.cue");
+        let edited = CUE.replace("\"Two\"", "\"Deux\"");
+        let edited = &edited[..edited.find("  TRACK 03").unwrap()];
+        std::fs::write(&sheet, edited).unwrap();
+        bump_mtime(&sheet, 5);
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.updated, r.removed, r.total), (2, 1, 2));
+        let t = lib.track(&two).unwrap();
+        assert_eq!(t.title, "Deux");
+        assert_eq!((t.play_count, t.favorite), (1, true), "stats kept");
+        assert_eq!(t.duration_ms, 4000, "now the last track of the file");
+        assert!(t.uri.ends_with("#t=2"));
+        assert_eq!(lib.playlist_tracks(pid).len(), 1);
+
+        // Without its sheet the file is an ordinary track again.
+        std::fs::remove_file(&sheet).unwrap();
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.added, r.removed, r.total), (1, 2, 1));
+        let audio = root.join("al/album.wav").to_string_lossy().into_owned();
+        let t = lib.track(&audio).unwrap();
+        assert_eq!(t.album.as_deref(), Some("File Album"));
+        assert_eq!(t.uri, file_uri(Path::new(&audio)));
+    }
+
+    #[test]
+    fn cue_tracks_in_m3u_round_trip() {
+        let (dir, root, lib) = cue_rig();
+        lib.scan_roots(std::slice::from_ref(&root));
+        let key = format!("{}#cue=2", root.join("al/album.wav").display());
+        let pid = lib.create_playlist("cue");
+        lib.add_to_playlist(pid, std::slice::from_ref(&key));
+        let m3u = dir.path().join("cue.m3u8");
+        lib.export_m3u(pid, &m3u).unwrap();
+        let text = std::fs::read_to_string(&m3u).unwrap();
+        assert_eq!(text, format!("#EXTM3U\n#RICERCAR-CUE:{key}\n"));
+        let back = lib.import_m3u(&m3u).unwrap();
+        let t = lib.playlist_tracks(back);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].title, "Two");
+    }
+
+    #[test]
+    fn upgrade_from_v2_keeps_user_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("lib.db");
+        {
+            let lib = Library::open(&db).unwrap();
+            lib.upsert_many(&[(
+                "/m/a/1.flac".into(),
+                tags("One", "A", "Al", Some("A"), 1),
+                1,
+                1,
+            )]);
+            lib.record_play("/m/a/1.flac");
+            lib.set_favorite("/m/a/1.flac", true);
+            let pid = lib.create_playlist("p");
+            lib.add_to_playlist(pid, &["/m/a/1.flac".to_string()]);
+        }
+        {
+            // Back to what version 2 looked like.
+            let c = Connection::open(&db).unwrap();
+            c.execute_batch(
+                "ALTER TABLE tracks DROP COLUMN cue_start;
+                 ALTER TABLE tracks DROP COLUMN cue_end;
+                 ALTER TABLE tracks DROP COLUMN cue_sheet;
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        }
+        let lib = Library::open(&db).unwrap();
+        let t = lib.track("/m/a/1.flac").unwrap();
+        assert_eq!((t.play_count, t.favorite), (1, true));
+        assert_eq!(lib.playlists()[0].track_count, 1);
+        assert_eq!(lib.recent_plays(5).len(), 1);
+        let v: i32 = lib
+            .r()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
     }
 }

@@ -29,6 +29,42 @@ the UI (`player.rs::wire`), MPRIS, UPnP eventing and the scrobblers. Nothing
 reads the player directly. Subscribe with `Controller::subscribe()`, read the
 current `CtlState` with `Controller::lock()` (keep the guard short).
 
+### Cue sheets
+
+An album ripped as one audio file plus a `.cue` sheet is indexed as its
+tracks (`ricercar-core/src/cue.rs` parses and cuts, `Library::scan_roots`
+indexes):
+
+- **Key.** A cue track's `path` is `<audio path>#cue=<TRACK number>`
+  (`cue::key`, `cue::split_key`, `cue::file_of`). Everything keyed by path
+  (stats, favorites, history, playlists, covers, search) works unchanged;
+  code that opens the file goes through `meta::on_disk` or `cue::file_of`.
+  The audio file itself is not listed. Only a file that a sheet cuts into
+  two tracks or more is replaced; a one-file-per-track rip keeps its files.
+- **Columns.** `tracks.cue_start` / `cue_end` (CD frames, 1/75 s; `NULL`
+  end = end of file) and `cue_sheet` (schema v3). A cue track's change
+  signature is the latest mtime of the sheet and the audio file; the file
+  size is counted on its first track only.
+- **Span.** A track runs from its `INDEX 01` to the next track's `INDEX 01`
+  in the same file (the pregap plays at the end of the track before it).
+  Metadata: the sheet first (track `TITLE` / `PERFORMER` / `SONGWRITER`,
+  disc `TITLE` → album, disc `PERFORMER` → album artist, `REM DATE` /
+  `GENRE` / `DISCNUMBER` / ReplayGain), then the audio file's tags.
+- **Playback.** `Track::uri` is the file URI plus a media fragment,
+  `file:///…/album.flac#t=<start>,<end>` in seconds (9 decimals, so it
+  rounds back to the exact sample at any rate). `TrackSource` seeks
+  sample-exactly to the start, stops at the end and keeps the samples
+  decoded past it. When the next item is the following span of the same
+  file, `Engine::continue_same_file` hands those samples on and keeps the
+  decoder running: gapless and sample-exact, nothing is reopened. Position,
+  duration and seeks are relative to the span.
+- **Elsewhere.** M3U export writes a cue track as a
+  `#RICERCAR-CUE:<key>` comment, which other players skip and
+  `import_m3u` reads back. The UPnP MediaServer lists cue tracks and
+  serves each as a WAV of exactly its samples (decoded on the fly, no
+  Range requests). The signal path's Source hop says `CUE track <n>`.
+  Embedded sheets (a `CUESHEET` tag) are not read.
+
 ## The UI crate
 
 - `ui/*.slint` holds the markup. `state.slint` declares the `Page` enum and the
@@ -106,7 +142,7 @@ Run the app against the demo library with a silent sink, without touching the
 real user data:
 
 ```sh
-scripts/demo-library.sh /tmp/rc/music          # 59 tracks, needs ffmpeg + magick
+scripts/demo-library.sh /tmp/rc/music          # 63 tracks, needs ffmpeg + magick
 export XDG_CONFIG_HOME=/tmp/rc/config XDG_DATA_HOME=/tmp/rc/data XDG_CACHE_HOME=/tmp/rc/cache
 ./target/debug/ricercar --device null --no-upnp --no-mpris --library /tmp/rc/music
 ```

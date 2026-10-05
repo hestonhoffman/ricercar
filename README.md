@@ -83,6 +83,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Albums, artists (with "appears on"), genres, all tracks
 - Favorites, play counts, history, most played
 - Playlists with M3U / M3U8 import & export
+- CUE sheets: an album ripped as one file plays as its tracks, gapless and
+  sample-exact
 - Covers: embedded, folder images, or Cover Art Archive
 - Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net
 
@@ -646,7 +648,8 @@ unit in `dist/`, and control it from your phone over UPnP / OpenHome.
 - [x] Network interface choice, keyboard navigation, AppStream metadata
 - [ ] Reports from real control points ([help wanted](docs/CONTROLS.md))
 - [ ] Optional parametric EQ / convolution (clearly marked non bit-perfect)
-- [ ] DSD over PCM (DoP), CUE sheets
+- [x] CUE sheets
+- [ ] DSD over PCM (DoP)
 - [ ] Composer / work views for classical music
 - [x] AppImage
 - [ ] Flatpak

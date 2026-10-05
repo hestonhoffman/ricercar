@@ -73,6 +73,15 @@ pub fn protocol_info(mime: &str) -> String {
     format!("http-get:*:{mime}:{}", dlna_features(mime))
 }
 
+/// A cue track is decoded and sent as WAV: converted content, no byte
+/// seeking.
+const CUE_FEATURES: &str =
+    "DLNA.ORG_OP=00;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01700000000000000000000000000000";
+
+pub fn cue_protocol_info() -> String {
+    format!("http-get:*:audio/wav:{CUE_FEATURES}")
+}
+
 /// Everything the renderer can decode (ConnectionManager Sink, OpenHome
 /// ProtocolInfo).
 pub const SINK_PROTOCOLS: &str = "http-get:*:audio/flac:*,http-get:*:audio/x-flac:*,http-get:*:audio/wav:*,http-get:*:audio/x-wav:*,http-get:*:audio/wave:*,http-get:*:audio/aiff:*,http-get:*:audio/x-aiff:*,http-get:*:audio/mpeg:*,http-get:*:audio/mp3:*,http-get:*:audio/mp4:*,http-get:*:audio/x-m4a:*,http-get:*:audio/aac:*,http-get:*:audio/ogg:*,http-get:*:audio/x-ogg:*,http-get:*:application/ogg:*";
@@ -163,6 +172,12 @@ pub fn serve_media(r: &Renderer, req: &Request, stream: &mut TcpStream) {
     if !r.ctl.lib.has_path(&path_str) {
         return http::not_found(stream);
     }
+    if ricercar_core::cue::split_key(&path_str).is_some() {
+        return match r.ctl.lib.track(&path_str) {
+            Some(t) => serve_cue(&t.uri, head_only, stream),
+            None => http::not_found(stream),
+        };
+    }
     let Ok(mut file) = File::open(&path) else {
         return http::not_found(stream);
     };
@@ -201,6 +216,89 @@ pub fn serve_media(r: &Renderer, req: &Request, stream: &mut TcpStream) {
     }
     // Write timeouts on the socket bound how long a stalled client holds us.
     let _ = std::io::copy(&mut file.take(to - from), stream);
+    let _ = stream.flush();
+}
+
+/// RIFF header of a PCM WAV file.
+fn wav_header(rate: u32, channels: u16, bytes: u16, data_len: u32) -> Vec<u8> {
+    let align = channels * bytes;
+    let mut h = Vec::with_capacity(44);
+    h.extend(b"RIFF");
+    h.extend((36 + data_len).to_le_bytes());
+    h.extend(b"WAVEfmt ");
+    h.extend(16u32.to_le_bytes());
+    h.extend(1u16.to_le_bytes());
+    h.extend(channels.to_le_bytes());
+    h.extend(rate.to_le_bytes());
+    h.extend((rate * align as u32).to_le_bytes());
+    h.extend(align.to_le_bytes());
+    h.extend((bytes * 8).to_le_bytes());
+    h.extend(b"data");
+    h.extend(data_len.to_le_bytes());
+    h
+}
+
+/// A cue track (part of an audio file) as a WAV of exactly its samples.
+/// Range requests are not served: the length is known, positions in it
+/// would need decoding up to them.
+fn serve_cue(uri: &str, head_only: bool, stream: &mut TcpStream) {
+    let Ok(mut src) = ricercar_audio::TrackSource::open(uri) else {
+        return http::not_found(stream);
+    };
+    let primed = src.pump().is_ok();
+    let (Some(fmt), Some(frames), true) = (src.format, src.span_frames(), primed) else {
+        return http::not_found(stream);
+    };
+    // Plain PCM WAV holds whole bytes per sample.
+    if !matches!(fmt.bits, 16 | 24 | 32) {
+        return http::not_found(stream);
+    }
+    let bytes = fmt.bits as u16 / 8;
+    let data_len = frames * fmt.channels as u64 * bytes as u64;
+    let Ok(data_len32) = u32::try_from(data_len) else {
+        return http::not_found(stream);
+    };
+    let header = wav_header(fmt.sample_rate, fmt.channels, bytes, data_len32);
+    let headers = [
+        ("CONTENT-TYPE", "audio/wav".to_string()),
+        ("ACCEPT-RANGES", "none".to_string()),
+        ("transferMode.dlna.org", "Streaming".to_string()),
+        ("contentFeatures.dlna.org", CUE_FEATURES.to_string()),
+        (
+            "CONTENT-LENGTH",
+            (header.len() as u64 + data_len).to_string(),
+        ),
+    ];
+    if !http::write_head(stream, 200, &headers) || head_only {
+        return;
+    }
+    if stream.write_all(&header).is_err() {
+        return;
+    }
+    let mut left = data_len as usize;
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    while left > 0 {
+        buf.clear();
+        for v in src.pending.drain(..) {
+            match bytes {
+                2 => buf.extend((v as i16).to_le_bytes()),
+                3 => buf.extend(&v.to_le_bytes()[..3]),
+                _ => buf.extend(v.to_le_bytes()),
+            }
+        }
+        if buf.is_empty() && !matches!(src.pump(), Ok(true)) {
+            break;
+        }
+        let n = buf.len().min(left);
+        if stream.write_all(&buf[..n]).is_err() {
+            return;
+        }
+        left -= n;
+    }
+    // The file ended early (truncated): keep the promised length.
+    if left > 0 {
+        let _ = stream.write_all(&vec![0u8; left]);
+    }
     let _ = stream.flush();
 }
 

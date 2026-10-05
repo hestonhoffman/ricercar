@@ -748,7 +748,8 @@ fn mark_fav(ui: &Ui, path: &str, fav: bool) {
 }
 
 pub fn show_in_folder(path: &str) {
-    let path = std::path::PathBuf::from(path);
+    // A cue track shows its audio file.
+    let path = std::path::PathBuf::from(ricercar_core::cue::file_of(path));
     // A D-Bus round trip (and a file manager starting up) must not freeze
     // the window: talk to it from a thread.
     std::thread::spawn(move || {

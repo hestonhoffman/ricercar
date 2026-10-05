@@ -436,5 +436,6 @@
 "{output} · default output; {device} not connected": "{output} · 既定の出力。{device} は未接続",
 "PipeWire default output": "PipeWire の既定の出力",
 "PipeWire default output; {device} not connected": "PipeWire の既定の出力。{device} は未接続",
-"NOT CONNECTED": "未接続"
+"NOT CONNECTED": "未接続",
+"CUE track {n}": "CUE トラック {n}"
 }

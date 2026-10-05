@@ -3,6 +3,7 @@
 pub mod config;
 pub mod controller;
 pub mod covers;
+pub mod cue;
 pub mod library;
 pub mod meta;
 pub mod plugin;

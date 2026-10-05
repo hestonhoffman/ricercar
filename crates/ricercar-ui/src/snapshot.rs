@@ -174,6 +174,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
     };
     let neon = album("Neon Rain");
     let fugues = album("Fugues & Ricercars");
+    let one_take = album("Live in One Take");
     let steps: Vec<(&str, Step)> = vec![
         (
             "home",
@@ -322,12 +323,47 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            // An album ripped as one file with a cue sheet: its tracks,
+            // and the second one playing.
+            "cue-album",
+            (
+                1500,
+                Box::new(move |ui| {
+                    let id = one_take();
+                    let tracks = ui.ctx.lib.album_tracks(&id);
+                    let ctl = ui.ctx.ctl.clone();
+                    ctl.play_library_tracks(
+                        &tracks,
+                        1,
+                        ricercar_core::PlayContext::Album(id.clone()),
+                    );
+                    ctl.pause();
+                    ui.navigate(Page::Album, &id, true);
+                    slint::Timer::single_shot(Duration::from_millis(300), move || {
+                        ctl.seek_ms(5_000);
+                    });
+                }),
+            ),
+        ),
+        (
+            "cue-signal-path",
+            (
+                900,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_np_tab(2);
+                    app.set_now_playing_open(true);
+                }),
+            ),
+        ),
+        (
             "album-light",
             (
                 1200,
                 Box::new(move |ui| {
                     ui.app().set_theme_dark(false);
                     ui.window.global::<crate::Theme>().set_dark(false);
+                    ui.app().set_now_playing_open(false);
                     let id = neon();
                     ui.navigate(Page::Album, &id, true);
                 }),

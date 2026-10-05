@@ -436,5 +436,6 @@
 "{output} · default output; {device} not connected": "{output} · salida predeterminada; {device} no conectado",
 "PipeWire default output": "Salida predeterminada de PipeWire",
 "PipeWire default output; {device} not connected": "Salida predeterminada de PipeWire; {device} no conectado",
-"NOT CONNECTED": "NO CONECTADO"
+"NOT CONNECTED": "NO CONECTADO",
+"CUE track {n}": "Pista CUE {n}"
 }

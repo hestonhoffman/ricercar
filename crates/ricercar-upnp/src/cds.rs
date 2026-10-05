@@ -123,18 +123,33 @@ fn track_art(base: &str, path: &str) -> String {
 
 fn track_item(id: &str, parent: &str, t: &Track, base: &str) -> String {
     let info = TrackInfo::from(t);
-    let mime = media::mime_of(&t.path);
-    let size = std::fs::metadata(&t.path).ok().map(|m| m.len());
+    // Served by library path: for a cue track, the key of its part of the
+    // audio file (sent as WAV).
+    let uri = meta::file_uri(std::path::Path::new(&t.path));
+    let cue = ricercar_core::cue::split_key(&t.path).is_some();
+    let (protocol_info, size, bitrate) = if cue {
+        let pcm_rate = match (t.sample_rate, t.channels, t.bits) {
+            (Some(r), Some(c), Some(b)) => Some(r * c as u32 * b.div_ceil(8) as u32),
+            _ => None,
+        };
+        (media::cue_protocol_info(), None, pcm_rate)
+    } else {
+        (
+            media::protocol_info(media::mime_of(&t.path)),
+            std::fs::metadata(&t.path).ok().map(|m| m.len()),
+            t.bitrate.map(|k| k * 1000 / 8),
+        )
+    };
     didl::ItemXml {
         id,
         parent,
         info: &info,
-        res_url: &media::media_url(base, &t.uri),
-        protocol_info: &media::protocol_info(mime),
+        res_url: &media::media_url(base, &uri),
+        protocol_info: &protocol_info,
         size,
         channels: t.channels,
-        bitrate: t.bitrate.map(|k| k * 1000 / 8),
-        art_url: Some(&media::track_art_url(base, &t.uri)),
+        bitrate,
+        art_url: Some(&media::track_art_url(base, &uri)),
     }
     .render()
 }

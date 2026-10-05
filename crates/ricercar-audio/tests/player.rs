@@ -699,3 +699,130 @@ fn pause_without_hardware_pause_replays_dropped_audio() {
     assert!(resumed_at <= written - DROPPED as usize * 2);
     assert_eq!(got[written..], golden[resumed_at..]);
 }
+
+// ------------------------------------------------------------ cue tracks
+
+/// Byte offset of `secs` in the 16-bit 44.1 kHz stereo golden.
+fn at_441(secs: f64) -> usize {
+    (secs * 44100.0).round() as usize * 4
+}
+
+fn started_and_ended(sub: &ricercar_audio::Subscriber) -> (Vec<String>, Vec<(String, EndReason)>) {
+    let (mut started, mut ended) = (Vec::new(), Vec::new());
+    while let Ok(ev) = sub.0.try_recv() {
+        match ev {
+            EngineEvent::TrackStarted { uri, .. } => started.push(uri),
+            EngineEvent::TrackEnded { uri, reason } => ended.push((uri, reason)),
+            _ => {}
+        }
+    }
+    (started, ended)
+}
+
+#[test]
+fn cue_track_plays_exactly_its_range() {
+    let golden = std::fs::read(fix("golden_16_441.raw")).unwrap();
+    let uri = format!("{}#t=0.6,1.4", fixture_uri("tone_16_441.flac"));
+    let (h, out) = spawn_file_player("cue-range");
+    let sub = h.subscribe();
+    h.load(&uri);
+    // Paused at once (load and pause are taken together), so the state can
+    // be read before the track runs out.
+    h.pause();
+    let started = wait_for(&sub, 10, |e| match e {
+        EngineEvent::TrackStarted { uri, .. } => Some(uri.clone()),
+        _ => None,
+    });
+    assert_eq!(started.as_ref(), Some(&uri));
+    assert_eq!(
+        h.state.lock().unwrap().dur_ms,
+        Some(800),
+        "duration is the range's"
+    );
+    h.resume();
+    assert!(wait_finished(&sub, 20));
+    let got = std::fs::read(&out).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert_same(&got, &golden[at_441(0.6)..at_441(1.4)], "cue range");
+}
+
+#[test]
+fn cue_ranges_are_exact_in_wav_and_aiff() {
+    // WAV 24/96: 0.05 s .. 0.13 s.
+    let (_h, got) = play_to_end("cue-wav", None, &["tone_24_96.wav#t=0.05,0.13"]);
+    let content = golden_content("golden_24_96.raw", 24);
+    assert_same(
+        &got,
+        &encode(&content[4800 * 2..12480 * 2], 24, Container::S24),
+        "wav range",
+    );
+    // AIFF 16/44.1 from a cue frame (8/75 s) to the end of the file.
+    let (_h, got) = play_to_end("cue-aiff", None, &["tone_16_441.aiff#t=0.106666667"]);
+    let golden = std::fs::read(fix("golden_16_441.raw")).unwrap();
+    assert_same(&got, &golden[8 * 588 * 4..88200], "aiff range");
+}
+
+#[test]
+fn consecutive_cue_tracks_are_gapless() {
+    let golden = std::fs::read(fix("golden_16_441.raw")).unwrap();
+    let base = fixture_uri("tone_16_441.flac");
+    // 16/75 s, 45/75 s and 105/75 s: cue sheet frames.
+    let uris = [
+        format!("{base}#t=0.213333333,0.6"),
+        format!("{base}#t=0.6,1.4"),
+        format!("{base}#t=1.4"),
+    ];
+    let (h, out) = spawn_file_player("cue-gapless");
+    let sub = h.subscribe();
+    let watch = h.subscribe();
+    h.load(&uris[0]);
+    h.enqueue_next(&uris[1]);
+    // Arm the third once the second is playing, as the controller does.
+    let second = wait_for(&sub, 10, |e| match e {
+        EngineEvent::TrackStarted { uri, .. } if *uri == uris[1] => Some(()),
+        _ => None,
+    });
+    assert!(second.is_some(), "second cue track started");
+    h.enqueue_next(&uris[2]);
+    assert!(wait_finished(&sub, 20));
+    let got = std::fs::read(&out).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert_same(&got, &golden[16 * 588 * 4..], "cue tracks back to back");
+    let (started, ended) = started_and_ended(&watch);
+    assert_eq!(started, uris);
+    assert_eq!(
+        ended,
+        uris.iter()
+            .map(|u| (u.clone(), EndReason::Finished))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn consecutive_cue_tracks_are_gapless_at_24_96() {
+    let (_h, got) = play_to_end(
+        "cue-gapless-24",
+        None,
+        &["tone_24_96.flac#t=0,0.52", "tone_24_96.flac#t=0.52"],
+    );
+    let want = encode(&golden_content("golden_24_96.raw", 24), 24, Container::S24);
+    assert_same(&got, &want, "24/96 cue tracks back to back");
+}
+
+#[test]
+fn seek_inside_cue_track_is_relative_and_exact() {
+    let golden = std::fs::read(fix("golden_16_441.raw")).unwrap();
+    let (h, out) = spawn_file_player("cue-seek");
+    let sub = h.subscribe();
+    h.load(format!("{}#t=0.6,1.4", fixture_uri("tone_16_441.flac")));
+    h.seek_ms(300);
+    let pos = wait_for(&sub, 10, |e| match e {
+        EngineEvent::Position { pos_ms, .. } => Some(*pos_ms),
+        _ => None,
+    });
+    assert_eq!(pos, Some(300), "position is relative to the track");
+    assert!(wait_finished(&sub, 20));
+    let got = std::fs::read(&out).unwrap();
+    let _ = std::fs::remove_file(&out);
+    assert_same(&got, &golden[at_441(0.9)..at_441(1.4)], "seek in cue track");
+}

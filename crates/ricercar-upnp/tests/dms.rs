@@ -386,3 +386,48 @@ fn deeply_nested_search_is_refused() {
     let (head, _) = get(p, "/server.xml", "");
     assert!(head.contains("200 OK"), "{head}");
 }
+
+#[test]
+fn cue_tracks_are_served_as_wav_of_their_samples() {
+    let r = rig("dms-cue", false);
+    let dir = std::env::temp_dir().join(format!("ricercar-upnp-cue-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let audio = dir.join("album.flac");
+    std::fs::copy(fixtures().join("tone_16_441.flac"), &audio).unwrap();
+    std::fs::write(
+        dir.join("album.cue"),
+        "TITLE \"Cut\"\nPERFORMER \"P\"\nFILE \"album.flac\" WAVE\n TRACK 01 AUDIO\n  TITLE \"A\"\n  INDEX 01 00:00:00\n TRACK 02 AUDIO\n  TITLE \"B\"\n  INDEX 01 00:00:45\n",
+    )
+    .unwrap();
+    assert_eq!(r.ctl.lib.scan_roots(std::slice::from_ref(&dir)).total, 2);
+
+    let didl = field(&children(r.port(), "tracks"), "Result");
+    let items: Vec<&str> = didl.split("<item ").skip(1).collect();
+    assert_eq!(items.len(), 2);
+    let mut bodies = Vec::new();
+    for (item, frames) in items.iter().zip([26460usize, 61740]) {
+        assert!(
+            item.contains("protocolInfo=\"http-get:*:audio/wav:DLNA.ORG_OP=00"),
+            "{item}"
+        );
+        let (head, body) = get(r.port(), &media_path(item), "");
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(head.contains("audio/wav"), "{head}");
+        assert_eq!(body.len(), 44 + frames * 4, "WAV of exactly the span");
+        assert_eq!(&body[..4], b"RIFF");
+        assert_eq!(u32::from_le_bytes(body[24..28].try_into().unwrap()), 44100);
+        bodies.extend_from_slice(&body[44..]);
+    }
+    // Both parts together are the whole file, sample for sample.
+    let mut src =
+        ricercar_audio::TrackSource::open(&ricercar_core::meta::file_uri(&audio)).unwrap();
+    let mut want = Vec::new();
+    while src.pump().unwrap() {
+        for v in src.pending.drain(..) {
+            want.extend((v as i16).to_le_bytes());
+        }
+    }
+    assert!(bodies == want, "cue parts differ from the file");
+    let _ = std::fs::remove_dir_all(&dir);
+}

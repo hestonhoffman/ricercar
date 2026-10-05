@@ -142,8 +142,20 @@ pub fn read_tags(path: &Path) -> TagInfo {
     info
 }
 
-/// Embedded unsynced lyrics or a sidecar `.lrc` next to the file.
+/// The file on disk behind a library path: the audio file of a cue track.
+pub fn on_disk(path: &Path) -> &Path {
+    match path.to_str() {
+        Some(p) => Path::new(crate::cue::file_of(p)),
+        None => path,
+    }
+}
+
+/// Embedded unsynced lyrics or a sidecar `.lrc` next to the file. None for
+/// a cue track: what the file holds is for the whole disc.
 pub fn local_lyrics(path: &Path) -> Option<String> {
+    if path.to_str().and_then(crate::cue::split_key).is_some() {
+        return None;
+    }
     let lrc = path.with_extension("lrc");
     if let Ok(s) = std::fs::read_to_string(&lrc)
         && !s.trim().is_empty()
@@ -157,7 +169,7 @@ pub fn local_lyrics(path: &Path) -> Option<String> {
 
 /// First embedded picture: (bytes, mime).
 pub fn embedded_cover(path: &Path) -> Option<(Vec<u8>, String)> {
-    let tf = Probe::open(path).ok()?.read().ok()?;
+    let tf = Probe::open(on_disk(path)).ok()?.read().ok()?;
     let tag = tf.primary_tag().or_else(|| tf.first_tag())?;
     let pics = tag.pictures();
     let front = pics
@@ -188,7 +200,7 @@ const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 /// `cover.jpg` & co. in the track's directory (or its parent for `CD1/`
 /// style multi-disc layouts).
 pub fn folder_cover(track: &Path) -> Option<PathBuf> {
-    let dir = track.parent()?;
+    let dir = on_disk(track).parent()?;
     let scan = |d: &Path| -> Option<PathBuf> {
         let mut images: Vec<PathBuf> = std::fs::read_dir(d)
             .ok()?
@@ -241,8 +253,11 @@ pub fn file_uri(path: &Path) -> String {
     out
 }
 
+/// Path of a `file://` URI. A bare `#` starts a fragment (a cue track's
+/// span): paths have theirs percent-encoded by `file_uri`.
 pub fn uri_to_path(uri: &str) -> Option<PathBuf> {
     uri.strip_prefix("file://")
+        .map(|p| p.split_once('#').map_or(p, |(p, _)| p))
         .map(|p| PathBuf::from(percent_decode(p)))
 }
 
@@ -284,6 +299,10 @@ mod tests {
         let uri = file_uri(p);
         assert!(!uri.contains(' ') && !uri.contains('#'));
         assert_eq!(uri_to_path(&uri).unwrap(), p);
+        assert_eq!(uri_to_path(&format!("{uri}#t=1,2")).unwrap(), p);
+        let key = format!("{}#cue=3", p.display());
+        assert_eq!(on_disk(Path::new(&key)), p);
+        assert_eq!(on_disk(p), p);
     }
 
     #[test]

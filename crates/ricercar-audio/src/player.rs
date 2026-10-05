@@ -362,7 +362,7 @@ enum NextSource {
     Pending(String),
     /// Being opened on a worker thread, off the audio path.
     Opening(String, Receiver<Opened>),
-    Open(TrackSource),
+    Open(Box<TrackSource>),
 }
 
 const POSITION_EVERY: Duration = Duration::from_millis(250);
@@ -610,6 +610,12 @@ impl Engine {
     /// Start opening the pending next track on a worker thread (network
     /// sources may take seconds to connect; the device buffer does not).
     fn preopen_next(&mut self) {
+        if let (Some(cur), Some((NextSource::Pending(uri), _))) = (&self.current, &self.next)
+            && cur.continues_into(uri)
+        {
+            // Decoding just goes on into it: nothing to open.
+            return;
+        }
         let Some((NextSource::Pending(uri), opts)) = self.next.take() else {
             return;
         };
@@ -639,7 +645,9 @@ impl Engine {
         let Some(result) = ready else { return };
         if let Some((NextSource::Opening(uri, _), opts)) = self.next.take() {
             self.next = match result {
-                Some(r) => self.accept(r).map(|t| (NextSource::Open(t), opts)),
+                Some(r) => self
+                    .accept(r)
+                    .map(|t| (NextSource::Open(Box::new(t)), opts)),
                 None => Some((NextSource::Pending(uri), opts)),
             };
         }
@@ -824,10 +832,13 @@ impl Engine {
 
     /// Current track finished: continue gaplessly with the next one, if any.
     fn transition(&mut self) {
+        if self.continue_same_file() {
+            return;
+        }
         self.end_current(EndReason::Finished);
         lock(&self.state).next_uri = None;
         let next = match self.next.take() {
-            Some((NextSource::Open(t), opts)) => Some((t, opts)),
+            Some((NextSource::Open(t), opts)) => Some((*t, opts)),
             Some((NextSource::Opening(uri, rx), opts)) => match rx.recv() {
                 Ok(r) => self.accept(r),
                 Err(_) => self.open_track(&uri),
@@ -847,6 +858,39 @@ impl Engine {
             return self.go_stopped(false);
         }
         self.begin(src, opts);
+    }
+}
+
+impl Engine {
+    /// The next track is the part of the same file that follows the current
+    /// one (cue sheets): keep the decoder going, which is sample-exact and
+    /// gapless whatever the container.
+    fn continue_same_file(&mut self) -> bool {
+        let next_uri = match &self.next {
+            Some((NextSource::Pending(u) | NextSource::Opening(u, _), _)) => u.clone(),
+            Some((NextSource::Open(t), _)) => t.uri.clone(),
+            None => return false,
+        };
+        let Some(cur) = self.current.as_ref() else {
+            return false;
+        };
+        if !cur.span_done() || !cur.continues_into(&next_uri) {
+            return false;
+        }
+        let Some((_, opts)) = self.next.take() else {
+            return false;
+        };
+        lock(&self.state).next_uri = None;
+        let Some(mut src) = self.current.take() else {
+            return false;
+        };
+        self.hub.publish(EngineEvent::TrackEnded {
+            uri: src.uri.clone(),
+            reason: EndReason::Finished,
+        });
+        src.continue_into(&next_uri);
+        self.begin(src, opts);
+        true
     }
 }
 
