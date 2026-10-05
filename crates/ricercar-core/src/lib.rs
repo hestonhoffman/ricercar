@@ -12,6 +12,7 @@ pub mod profile;
 pub mod synth;
 pub mod update;
 pub mod watcher;
+pub mod writer;
 
 pub use config::Config;
 pub use controller::{

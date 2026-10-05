@@ -236,10 +236,8 @@ pub fn remember_picked(ui: &Ui, device: &str, description: &str) {
 
 fn save(ui: &Ui) {
     let st = ui.saved_state.borrow().clone();
-    if std::env::var_os("RICERCAR_SNAPSHOT").is_none()
-        && let Err(e) = st.save(&crate::ui_state::default_path())
-    {
-        tracing::warn!("save ui-state.json: {e}");
+    if std::env::var_os("RICERCAR_SNAPSHOT").is_none() {
+        crate::app::queue_state_save(ui, &st);
     }
 }
 

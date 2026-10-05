@@ -9,6 +9,7 @@ use ricercar_audio::device::list_devices;
 use ricercar_core::config::{self, Config};
 use ricercar_core::covers::CoverCache;
 use ricercar_core::plugin::settings;
+use ricercar_core::writer::{Durability, LatestWriter};
 use ricercar_core::{Controller, Library, watcher::WatcherHandle};
 
 pub mod diag;
@@ -179,6 +180,9 @@ pub struct AppContext {
     pub covers: Arc<CoverCache>,
     pub config: Arc<RwLock<Config>>,
     pub config_path: PathBuf,
+    /// Writes files off the calling thread (the UI thread, mostly).
+    /// config.toml is durable, written there; ui-state.json too, as a cache.
+    pub io: Arc<LatestWriter>,
     pub quit: Arc<AtomicBool>,
     /// Source plugins declared in the config (docs/plugins.md).
     pub plugins: ricercar_core::plugin::PluginHost,
@@ -426,11 +430,13 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     };
 
     let config = Arc::new(RwLock::new(cfg));
+    let io = Arc::new(LatestWriter::new("ricercar-io"));
     scrobble::spawn(ctl.clone(), config.clone());
     watch_plugin_tables(
         config_path.clone(),
         config.clone(),
         plugins.clone(),
+        io.clone(),
         quit.clone(),
     );
 
@@ -451,6 +457,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         covers,
         config,
         config_path,
+        io,
         quit,
         watcher,
         _mpris: mpris,
@@ -473,10 +480,6 @@ pub fn output_info(
         rates,
     }
 }
-
-/// Config saves still running on another thread: until they are done the
-/// file is older than the config in memory, and not a hand edit.
-static SAVES_PENDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Start, stop or tell plugins to match the config as it is now, one call
 /// at a time.
@@ -505,6 +508,7 @@ fn watch_plugin_tables(
     path: PathBuf,
     config: Arc<RwLock<Config>>,
     host: ricercar_core::plugin::PluginHost,
+    io: Arc<LatestWriter>,
     quit: Arc<AtomicBool>,
 ) {
     let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
@@ -515,10 +519,9 @@ fn watch_plugin_tables(
             while !quit.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 let now = mtime(&path);
-                if now == seen || SAVES_PENDING.load(Ordering::SeqCst) > 0 {
+                if now == seen {
                     continue;
                 }
-                seen = now;
                 let Ok(text) = std::fs::read_to_string(&path) else {
                     continue;
                 };
@@ -528,6 +531,13 @@ fn watch_plugin_tables(
                 };
                 let changed = {
                     let mut c = config.write().unwrap();
+                    // Saves are queued under this lock: while one is not
+                    // written, the file is older than the config in memory,
+                    // and not a hand edit.
+                    if io.is_pending(&path) {
+                        continue;
+                    }
+                    seen = now;
                     let changed = c.plugins != file.plugins;
                     c.plugins = file.plugins.clone();
                     changed
@@ -586,11 +596,9 @@ impl AppContext {
             let (roots, network, plugins) =
                 (c.library.clone(), c.network.clone(), c.plugins.clone());
             f(&mut c);
+            self.queue_config_save(&c);
             (roots, network, plugins, c.clone())
         };
-        if let Err(e) = cfg.save(&self.config_path) {
-            tracing::warn!("save config: {e}");
-        }
         if cfg.audio.device != self.ctl.device_name() {
             self.ctl.set_device(&cfg.audio.device);
             self.plugins
@@ -608,6 +616,15 @@ impl AppContext {
         }
         if old_network != cfg.network {
             self.restart_network();
+        }
+    }
+
+    /// Save the config off the calling thread, latest version only. Called
+    /// with the config locked, so an older state never lands after a newer.
+    fn queue_config_save(&self, c: &Config) {
+        match c.to_bytes() {
+            Ok(b) => self.io.submit(&self.config_path, b, Durability::Durable),
+            Err(e) => tracing::warn!("save config: {e}"),
         }
     }
 
@@ -665,23 +682,11 @@ impl AppContext {
         self.save_plugin_settings();
     }
 
-    /// Save the config and tell the plugins, off the calling thread. The
-    /// config stays locked while it is written, so an older state never
-    /// lands on disk after a newer one.
+    /// Save the config and tell the plugins, off the calling thread.
     fn save_plugin_settings(&self) {
-        let (host, config, path) = (
-            self.plugins.clone(),
-            self.config.clone(),
-            self.config_path.clone(),
-        );
-        SAVES_PENDING.fetch_add(1, Ordering::SeqCst);
-        std::thread::spawn(move || {
-            if let Err(e) = config.read().unwrap().save(&path) {
-                tracing::warn!("save config: {e}");
-            }
-            SAVES_PENDING.fetch_sub(1, Ordering::SeqCst);
-            reconcile_plugins(&host, &config);
-        });
+        self.queue_config_save(&self.config.read().unwrap());
+        let (host, config) = (self.plugins.clone(), self.config.clone());
+        std::thread::spawn(move || reconcile_plugins(&host, &config));
     }
 
     /// Restart the UPnP services with the current settings, off the calling
@@ -737,6 +742,8 @@ impl AppContext {
         }
         self.plugins.shutdown();
         self.ctl.shutdown();
+        // Queued config writes.
+        self.io.shutdown();
         tracing::info!("bye");
     }
 }
@@ -866,7 +873,8 @@ mod tests {
         let host =
             ricercar_core::plugin::PluginHost::new("t", dir.path().join("d"), dir.path().join("c"));
         let quit = Arc::new(AtomicBool::new(false));
-        watch_plugin_tables(path.clone(), config.clone(), host.clone(), quit.clone());
+        let io = Arc::new(LatestWriter::new("test-io"));
+        watch_plugin_tables(path.clone(), config.clone(), host.clone(), io, quit.clone());
         std::thread::sleep(std::time::Duration::from_millis(1100));
         std::fs::write(
             &path,

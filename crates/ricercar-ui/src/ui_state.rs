@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use ricercar_core::writer::{Durability, LatestWriter};
 use serde::{Deserialize, Serialize};
 
 use crate::Page;
@@ -71,9 +72,21 @@ impl UiState {
             .unwrap_or_default()
     }
 
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    /// Queue a write on `io` and return at once. ui-state.json is a cache:
+    /// no fsync while running (a slow sync froze the window), only the last
+    /// save at exit is synced ([`save_durable`](Self::save_durable)).
+    pub fn submit(&self, path: &Path, io: &LatestWriter) {
+        match serde_json::to_vec_pretty(self) {
+            Ok(json) => io.submit(path, json, Durability::Cache),
+            Err(e) => tracing::warn!("save ui-state.json: {e}"),
+        }
+    }
+
+    /// Write now, synced, after what `io` is writing; drops a queued older
+    /// version.
+    pub fn save_durable(&self, path: &Path, io: &LatestWriter) -> std::io::Result<()> {
         let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        ricercar_core::config::write_atomic(path, &json)
+        io.write_now(path, &json, Durability::Durable)
     }
 
     pub fn page(&self) -> Page {
@@ -200,7 +213,9 @@ mod tests {
             recent_searches: vec!["bach".into()],
             ..Default::default()
         };
-        st.save(&p).unwrap();
+        let io = LatestWriter::new("test-io");
+        st.submit(&p, &io);
+        io.flush();
         let back = UiState::load(&p);
         assert_eq!(back, st);
         assert_eq!(back.page(), Page::Artists);
@@ -239,11 +254,32 @@ mod tests {
         // Saved and read back; files from before load with no names.
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("ui-state.json");
-        st.save(&p).unwrap();
+        st.save_durable(&p, &LatestWriter::new("test-io")).unwrap();
         assert_eq!(UiState::load(&p).device_names, st.device_names);
         std::fs::write(&p, r#"{"page":"albums","dac_caps":{}}"#).unwrap();
         let old = UiState::load(&p);
         assert_eq!((old.page(), old.device_names.len()), (Page::Albums, 0));
+    }
+
+    #[test]
+    fn saves_while_running_are_not_synced() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s = seen.clone();
+        let io = LatestWriter::with_sink("test-io", move |_, bytes, durability| {
+            s.lock().unwrap().push((bytes.to_vec(), durability));
+            Ok(())
+        });
+        let p = Path::new("ui-state.json");
+        let mut st = UiState::default();
+        st.submit(p, &io);
+        io.flush();
+        st.queue_open = true;
+        st.save_durable(p, &io).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].1, Durability::Cache);
+        assert_eq!(seen.last().unwrap().1, Durability::Durable);
+        let last: UiState = serde_json::from_slice(&seen.last().unwrap().0).unwrap();
+        assert!(last.queue_open);
     }
 
     #[test]

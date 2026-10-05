@@ -18,6 +18,7 @@ use crate::meta;
 use crate::plugin::{
     Delivery, PluginError, Purpose, RADIO_LIMIT, Resolved, Resolver, is_plugin_uri,
 };
+use crate::writer::{Durability, LatestWriter};
 
 /// Metadata about a playable item (library track, pushed stream, radio).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -396,6 +397,9 @@ pub struct Controller {
     next_id: Arc<AtomicU64>,
     alive: Arc<AtomicBool>,
     session_path: Arc<Mutex<Option<PathBuf>>>,
+    /// session.json is durable but written off the engine-event thread: a
+    /// slow fsync must not hold back TrackStarted at a track change.
+    session_writer: Arc<LatestWriter>,
     /// Restored session waiting for the first "play".
     resume_at: Mutex<Option<u64>>,
     rg_preamp: Mutex<f32>,
@@ -466,6 +470,7 @@ impl Controller {
             next_id: Arc::new(AtomicU64::new(1)),
             alive: Arc::new(AtomicBool::new(true)),
             session_path: Arc::new(Mutex::new(None)),
+            session_writer: Arc::new(LatestWriter::new("ricercar-session-io")),
             resume_at: Mutex::new(None),
             rg_preamp: Mutex::new(0.0),
             resolver: Arc::new(RwLock::new(None)),
@@ -503,6 +508,7 @@ impl Controller {
         let events = self.events.clone();
         let lib = self.lib.clone();
         let session_path = self.session_path.clone();
+        let session_writer = self.session_writer.clone();
         let bridge = self.bridge();
         std::thread::Builder::new()
             .name("ricercar-ctl".into())
@@ -582,7 +588,7 @@ impl Controller {
                             if rev != saved_rev {
                                 saved_rev = rev;
                                 if let Some(p) = session_path.lock().unwrap().clone() {
-                                    save_session_to(&state, &p);
+                                    queue_session_save(&state, &p, &session_writer);
                                 }
                             }
                         }
@@ -1316,13 +1322,21 @@ impl Controller {
         self.events.publish(CtlEvent::TrackChanged);
     }
 
+    /// Save the session now, on the calling thread.
     pub fn save_session(&self) {
-        if let Some(p) = self.session_path.lock().unwrap().clone() {
-            save_session_to(&self.state, &p);
+        if let Some(p) = self.session_path.lock().unwrap().clone()
+            && let Some(json) = session_bytes(&self.state)
+            && let Err(e) = self
+                .session_writer
+                .write_now(&p, &json, Durability::Durable)
+        {
+            tracing::warn!("save session: {e}");
         }
     }
 
     pub fn shutdown(&self) {
+        // Queued saves first, then the last one, synchronously.
+        self.session_writer.shutdown();
         self.save_session();
         self.player().stop();
         self.alive.store(false, Ordering::Relaxed);
@@ -1339,11 +1353,19 @@ fn new_items(next_id: &AtomicU64, infos: Vec<TrackInfo>) -> Vec<QueueItem> {
         .collect()
 }
 
-fn save_session_to(state: &Mutex<CtlState>, path: &std::path::Path) {
+/// Hand the session to its writer thread: returns at once.
+fn queue_session_save(state: &Mutex<CtlState>, path: &std::path::Path, writer: &LatestWriter) {
+    if let Some(json) = session_bytes(state) {
+        writer.submit(path, json, Durability::Durable);
+    }
+}
+
+/// The session to save; none while a remote control point drives the queue.
+fn session_bytes(state: &Mutex<CtlState>) -> Option<Vec<u8>> {
     let s = {
         let st = state.lock().unwrap_or_else(|e| e.into_inner());
         if st.origin == Origin::Remote {
-            return;
+            return None;
         }
         Session {
             queue: st.queue.iter().map(|q| q.info.clone()).collect(),
@@ -1367,11 +1389,7 @@ fn save_session_to(state: &Mutex<CtlState>, path: &std::path::Path) {
             }),
         }
     };
-    if let Ok(json) = serde_json::to_vec(&s)
-        && let Err(e) = crate::config::write_atomic(path, &json)
-    {
-        tracing::warn!("save session: {e}");
-    }
+    serde_json::to_vec(&s).ok()
 }
 
 /// Engine-side half of the controller, shared by the controller, its bridge
@@ -2276,6 +2294,38 @@ mod tests {
         // Sessions saved before these fields still load.
         let old: TrackInfo = serde_json::from_str(r#"{"uri":"plugin://d/t","title":"x"}"#).unwrap();
         assert_eq!((old.album_ref, old.artist_ref), (None, None));
+    }
+
+    #[test]
+    fn periodic_session_saves_do_not_wait_for_the_disk() {
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let held = Arc::new(AtomicBool::new(false));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let (g, h, w) = (gate.clone(), held.clone(), written.clone());
+        let writer = LatestWriter::with_sink("test-session-io", move |_, bytes, durability| {
+            assert_eq!(durability, Durability::Durable);
+            if !h.swap(true, Ordering::SeqCst) {
+                g.wait();
+            }
+            w.lock().unwrap().push(bytes.to_vec());
+            Ok(())
+        });
+        let c = ctl();
+        c.enqueue((1..=3).map(info).collect(), EnqueueAt::End);
+        let p = std::path::Path::new("session.json");
+        let t = Instant::now();
+        // The first save holds the writer (a stuck fsync); the others queue.
+        for pos in 0..50 {
+            c.lock().pos_ms = pos;
+            queue_session_save(&c.state, p, &writer);
+        }
+        assert!(t.elapsed() < Duration::from_secs(1));
+        gate.wait();
+        writer.flush();
+        let written = written.lock().unwrap();
+        let last: Session = serde_json::from_slice(written.last().unwrap()).unwrap();
+        assert_eq!(last.pos_ms, 49);
+        assert!(written.len() <= 2);
     }
 
     fn vol(c: &Controller) -> (u32, bool) {

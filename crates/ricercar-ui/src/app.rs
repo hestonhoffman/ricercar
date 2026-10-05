@@ -281,6 +281,8 @@ pub struct Ui {
     pub visible: std::cell::Cell<bool>,
     /// Interface state as last saved to ui-state.json.
     pub saved_state: RefCell<UiState>,
+    /// ui-state.json was written without a sync since startup.
+    pub state_unsynced: std::cell::Cell<bool>,
     pub plugins: RefCell<crate::plugins::PluginsView>,
 }
 
@@ -527,6 +529,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         tray: RefCell::new(None),
         visible: std::cell::Cell::new(true),
         saved_state: RefCell::new(UiState::default()),
+        state_unsynced: std::cell::Cell::new(false),
         plugins: RefCell::new(crate::plugins::PluginsView::default()),
     });
     UI.with(|u| *u.borrow_mut() = Some(ui.clone()));
@@ -617,10 +620,11 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
     }
     window.show()?;
     slint::run_event_loop_until_quit()?;
-    if keep_state {
-        save_state(&ui);
-    }
+    let last = keep_state.then(|| current_state(&ui));
     let _ = window.hide();
+    if let Some(st) = last {
+        save_final_state(&ui, st);
+    }
     ctx.shutdown();
     UI.with(|u| *u.borrow_mut() = None);
     crate::updates::restart_if_asked();
@@ -909,13 +913,30 @@ pub fn current_state(ui: &Ui) -> UiState {
     }
 }
 
-/// Write ui-state.json when something changed.
+/// Write ui-state.json when something changed, off the UI thread. The
+/// state counts as saved once queued: a failed write is logged, and the
+/// exit save writes the file again.
 pub fn save_state(ui: &Ui) {
     let st = current_state(ui);
     if st == *ui.saved_state.borrow() {
         return;
     }
-    match st.save(&crate::ui_state::default_path()) {
+    queue_state_save(ui, &st);
+    *ui.saved_state.borrow_mut() = st;
+}
+
+/// Queue `st` for ui-state.json; returns at once.
+pub fn queue_state_save(ui: &Ui, st: &UiState) {
+    st.submit(&crate::ui_state::default_path(), &ui.ctx.io);
+    ui.state_unsynced.set(true);
+}
+
+/// At exit, window hidden: the last state, synced, after the queued writes.
+fn save_final_state(ui: &Ui, st: UiState) {
+    if st == *ui.saved_state.borrow() && !ui.state_unsynced.get() {
+        return;
+    }
+    match st.save_durable(&crate::ui_state::default_path(), &ui.ctx.io) {
         Ok(()) => *ui.saved_state.borrow_mut() = st,
         Err(e) => tracing::warn!("save ui-state.json: {e}"),
     }
