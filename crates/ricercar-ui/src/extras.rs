@@ -466,7 +466,7 @@ fn add_root(ui: &Ui, dir: std::path::PathBuf) {
 
 /// Whether a file chooser portal answers on the session bus (starting it if
 /// needed). Without one, rfd reports "nothing picked" as for a cancel.
-fn file_chooser_available() -> bool {
+pub(crate) fn file_chooser_available() -> bool {
     let Ok(bus) = zbus::blocking::Connection::session() else {
         return false;
     };

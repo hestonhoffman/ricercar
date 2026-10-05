@@ -96,6 +96,7 @@ fn config(args: &[&str], enabled: bool) -> PluginConfig {
         enabled,
         version: None,
         host: None,
+        source: None,
         settings: Default::default(),
     }
 }
@@ -821,4 +822,59 @@ fn interface_language_reaches_plugins() {
     rig.host.reconcile(&[]);
     rig.host.reconcile(&[config(&["--no-auth"], true)]);
     assert!(rig.wait_log(r#"locale "fr""#), "{}", rig.log());
+}
+
+#[test]
+fn install_from_a_file_identifies_and_copies_the_plugin() {
+    use ricercar_core::plugin::catalog::CatalogError;
+    use ricercar_core::plugin::source::{self, Origin};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("plugin-bin");
+    let c = source::read_file(Path::new(BIN)).unwrap();
+    let (cfg, info) = source::install(&c, &root, "0.0.0-test", &[]).unwrap();
+    assert_eq!(cfg.id, "demo");
+    assert_eq!(info.id, "demo");
+    assert!(cfg.command.starts_with(root.join("demo")) && cfg.command.exists());
+    assert!(cfg.version.is_some());
+    assert!(matches!(Origin::of(&cfg), Some(Origin::File(_))));
+    // Nothing left from the identification run.
+    let left: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["demo"]);
+
+    // Built again: a file replaces a file.
+    assert!(source::install(&c, &root, "0.0.0-test", std::slice::from_ref(&cfg)).is_ok());
+    // A plugin with the same id from elsewhere is not replaced.
+    let mut by_hand = config(&[], true);
+    by_hand.command = PathBuf::from("/x");
+    assert_eq!(
+        source::install(&c, &root, "0.0.0-test", &[by_hand]).unwrap_err(),
+        CatalogError::Taken("demo".into())
+    );
+
+    // The installed copy runs.
+    let host = PluginHost::new(
+        "0.0.0-test",
+        dir.path().join("data"),
+        dir.path().join("cache"),
+    );
+    host.reconcile(&[cfg]);
+    assert!(wait(10, || host
+        .status("demo")
+        .is_some_and(|s| s.state == RunState::Running)));
+    host.shutdown();
+}
+
+#[test]
+fn a_program_that_is_not_a_plugin_is_refused() {
+    use ricercar_core::plugin::source;
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("not-a-plugin");
+    std::fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+    let c = source::read_file(&bin).unwrap();
+    let root = dir.path().join("plugin-bin");
+    assert!(source::install(&c, &root, "0.0.0-test", &[]).is_err());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
 }

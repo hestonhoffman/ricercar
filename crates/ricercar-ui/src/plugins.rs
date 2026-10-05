@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use ricercar_core::library::Track;
 use ricercar_core::plugin::{
-    AuthState, Item, ItemKind, PluginError, PluginStatus, RunState, catalog,
+    AuthState, Item, ItemKind, PluginError, PluginStatus, RunState, catalog, source,
 };
 use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
@@ -36,6 +36,19 @@ pub fn card_target(id: &str) -> Option<(&str, bool)> {
 const PAGE: usize = 100;
 /// Most tracks gathered to play a plugin album or playlist.
 const PLAY_MAX: usize = 1000;
+
+/// What the install dialog asks about.
+#[derive(Clone)]
+enum Pending {
+    /// A catalogue entry (the hub or another index).
+    Entry(catalog::Entry),
+    /// Another index to read with the hub's.
+    Index(String),
+    /// The latest release of a GitHub repository.
+    Release(source::Release),
+    /// A binary already read (a link or a file).
+    Binary(source::Candidate),
+}
 
 #[derive(Default)]
 pub struct PluginsView {
@@ -66,8 +79,10 @@ pub struct PluginsView {
     /// Community catalogue as last read, and the read in flight.
     catalog: Vec<catalog::Entry>,
     catalog_serial: u64,
-    /// Entry waiting for the install confirmation.
-    pending_install: Option<catalog::Entry>,
+    /// What waits for the install confirmation.
+    pending_install: Option<Pending>,
+    /// Newer releases of plugins installed from a GitHub repository.
+    releases: HashMap<String, source::Release>,
     /// Index to read instead of the hub's (the headless tour).
     pub index_override: Option<String>,
     /// Library lists of signed-in plugins with `library`, in declaration
@@ -323,10 +338,15 @@ fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
             PluginRow {
                 id: s.id.clone().into(),
                 name: s.name.clone().into(),
-                detail: if s.version.is_empty() {
-                    s.id.clone()
-                } else {
-                    format!("{} · {}", s.id, s.version)
+                detail: {
+                    let mut d = vec![s.id.clone()];
+                    if !s.version.is_empty() {
+                        d.push(s.version.clone());
+                    }
+                    if let Some(o) = declared.get(&s.id).and_then(source::Origin::of) {
+                        d.push(crate::text::plugin_origin(&o));
+                    }
+                    d.join(" · ")
                 }
                 .into(),
                 status: status.into(),
@@ -340,6 +360,10 @@ fn refresh_rows(ui: &Ui, statuses: &[PluginStatus]) {
                         .iter()
                         .find(|e| e.id == s.id)
                         .is_some_and(|e| e.installable() && catalog::update_available(d, e))
+                        || pv
+                            .releases
+                            .get(&s.id)
+                            .is_some_and(|r| source::release_is_newer(d, r))
                 }),
                 has_settings: !s.settings.is_empty(),
                 running: s.state == RunState::Running,
@@ -2264,6 +2288,46 @@ fn index_source(ui: &Ui) -> (String, bool) {
     }
 }
 
+/// Other indexes the user added (none while the tour reads its own).
+fn other_indexes(ui: &Ui) -> Vec<String> {
+    if ui.plugins.borrow().index_override.is_some() {
+        return Vec::new();
+    }
+    ui.ctx.config.read().unwrap().online.plugin_indexes.clone()
+}
+
+/// Look for newer releases of the plugins installed from a GitHub
+/// repository.
+fn check_releases(ui: &Ui) {
+    let repos: Vec<(String, String)> = ui
+        .ctx
+        .config
+        .read()
+        .unwrap()
+        .plugins
+        .iter()
+        .filter_map(|p| match source::Origin::of(p) {
+            Some(source::Origin::Github(repo)) => Some((p.id.clone(), repo)),
+            _ => None,
+        })
+        .collect();
+    if repos.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        for (id, repo) in repos {
+            match source::latest_release(&repo) {
+                Ok(r) => post(move |ui| {
+                    ui.plugins.borrow_mut().releases.insert(id, r);
+                    ui.plugins.borrow_mut().rev = None;
+                    poll(ui);
+                }),
+                Err(e) => tracing::info!("plugin update check ({repo}): {e}"),
+            }
+        }
+    });
+}
+
 /// At startup, when plugins were installed from the catalogue: read it
 /// once so the Plugins entry can show how many have an update.
 pub fn check_updates(ui: &Rc<Ui>) {
@@ -2272,9 +2336,11 @@ pub fn check_updates(ui: &Rc<Ui>) {
         return;
     }
     drop(cfg);
+    check_releases(ui);
     let (url, local) = index_source(ui);
+    let others = other_indexes(ui);
     std::thread::spawn(move || {
-        let r = catalog::fetch_index(&url, local);
+        let r = catalog::fetch_all(&url, local, &others).map(|(list, _)| list);
         post(move |ui| match r {
             Ok(list) => {
                 let mut pv = ui.plugins.borrow_mut();
@@ -2310,23 +2376,25 @@ pub fn load_page(ui: &Rc<Ui>) {
     };
     ui.app()
         .set_catalog_status(t("Loading the catalogue…").into());
+    check_releases(ui);
     let (url, local) = index_source(ui);
+    let others = other_indexes(ui);
     std::thread::spawn(move || {
-        let r = catalog::fetch_index(&url, local);
+        let r = catalog::fetch_all(&url, local, &others);
         post(move |ui| {
             if ui.plugins.borrow().catalog_serial != serial {
                 return;
             }
             match r {
-                Ok(list) => {
-                    ui.app().set_catalog_status(
-                        if list.is_empty() {
-                            t("The catalogue is empty for now.")
-                        } else {
-                            ""
-                        }
-                        .into(),
-                    );
+                Ok((list, failed)) => {
+                    let mut status: Vec<String> = failed
+                        .iter()
+                        .map(|(u, e)| format!("{}: {e}", tf("Could not read {url}", &[("url", u)])))
+                        .collect();
+                    if list.is_empty() {
+                        status.push(t("The catalogue is empty for now.").to_string());
+                    }
+                    ui.app().set_catalog_status(status.join("\n").into());
                     ui.plugins.borrow_mut().catalog = list;
                 }
                 Err(e) => ui.app().set_catalog_status(
@@ -2387,6 +2455,11 @@ fn refresh_catalog_rows(ui: &Ui) {
             if !e.version.is_empty() {
                 by.push(e.version.clone());
             }
+            if let Some(u) = &e.index {
+                by.push(crate::text::plugin_origin(&source::Origin::Index(
+                    u.clone(),
+                )));
+            }
             CatalogRow {
                 id: e.id.clone().into(),
                 name: e.name.chars().take(80).collect::<String>().into(),
@@ -2405,6 +2478,18 @@ fn refresh_catalog_rows(ui: &Ui) {
         .collect();
     ui.app()
         .set_catalog_rows(ModelRc::new(VecModel::from(rows)));
+    let indexes: Vec<slint::SharedString> = ui
+        .ctx
+        .config
+        .read()
+        .unwrap()
+        .online
+        .plugin_indexes
+        .iter()
+        .map(|u| u.into())
+        .collect();
+    ui.app()
+        .set_plugin_indexes(ModelRc::new(VecModel::from(indexes)));
 }
 
 fn entry(ui: &Ui, id: &str) -> Option<catalog::Entry> {
@@ -2418,6 +2503,13 @@ fn entry(ui: &Ui, id: &str) -> Option<catalog::Entry> {
 
 /// Ask before downloading and running anything.
 pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
+    if update {
+        let release = ui.plugins.borrow().releases.get(id).cloned();
+        if let Some(r) = release {
+            confirm_release(ui, r, true);
+            return;
+        }
+    }
     let Some(e) = entry(ui, id) else { return };
     let Some(asset) = e.asset_for(catalog::current_arch()) else {
         return;
@@ -2459,15 +2551,146 @@ pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
             body = format!("{}\n\n{body}", crate::text::host_changed(&old, &host_name));
         }
     }
+    ask(ui, Pending::Entry(e), body, "");
+}
+
+/// Open the install dialog about `p` (its title already set).
+fn ask(ui: &Ui, p: Pending, body: String, action: &'static str) {
+    let app = ui.app();
     app.set_install_body(body.into());
+    app.set_install_action(action.into());
     app.set_install_busy(false);
-    ui.plugins.borrow_mut().pending_install = Some(e);
+    ui.plugins.borrow_mut().pending_install = Some(p);
     app.set_install_open(true);
 }
 
-pub fn do_install(ui: &Ui) {
-    let Some(e) = ui.plugins.borrow().pending_install.clone() else {
+fn confirm_release(ui: &Ui, r: source::Release, update: bool) {
+    let name = format!("github.com/{}", r.repo);
+    ui.app().set_install_title(
+        if update {
+            tf("Update {name}?", &[("name", &name)])
+        } else {
+            tf("Install {name}?", &[("name", &name)])
+        }
+        .into(),
+    );
+    let body = crate::text::release_body(&r.repo, &r.tag, &r.asset_name, r.sha256.is_some());
+    ask(ui, Pending::Release(r), body, "");
+}
+
+pub(crate) fn confirm_binary(ui: &Ui, c: source::Candidate) {
+    let what = match &c.origin {
+        source::Origin::File(p) => p.display().to_string(),
+        source::Origin::Url(u) => u.clone(),
+        o => o.to_string(),
+    };
+    ui.app().set_install_title(t("Install this plugin?").into());
+    let body = crate::text::binary_body(&what, &c.sha256, c.verified);
+    ask(ui, Pending::Binary(c), body, "");
+}
+
+fn confirm_index(ui: &Ui, url: String, entries: usize) {
+    if ui
+        .ctx
+        .config
+        .read()
+        .unwrap()
+        .online
+        .plugin_indexes
+        .contains(&url)
+    {
+        ui.toast(t("This index is already in the list."), false);
         return;
+    }
+    ui.app()
+        .set_install_title(t("Add this plugin index?").into());
+    let body = crate::text::index_body(&url, entries);
+    ask(ui, Pending::Index(url), body, t("Add"));
+}
+
+/// What a link points at, read in the background, then the matching
+/// confirmation.
+fn add_link(ui: &Ui, link: &str) {
+    let link = link.trim().to_string();
+    if link.is_empty() {
+        return;
+    }
+    ui.app().set_link_open(false);
+    ui.toast(t("Reading the link…"), false);
+    std::thread::spawn(move || {
+        let r = source::read_link(&link);
+        post(move |ui| match r {
+            Ok(source::Link::Index { url, entries }) => confirm_index(ui, url, entries.len()),
+            Ok(source::Link::Github(r)) => confirm_release(ui, r, false),
+            Ok(source::Link::Binary(c)) => confirm_binary(ui, c),
+            Err(e) => ui.toast(format!("{}: {e}", t("Could not use this link")), true),
+        });
+    });
+}
+
+/// Pick a plugin program on this computer (or type its path when there is
+/// no file picker).
+fn add_file() {
+    std::thread::spawn(|| {
+        let picker = crate::extras::file_chooser_available();
+        let asked = Instant::now();
+        let file = if picker {
+            rfd::FileDialog::new().pick_file()
+        } else {
+            None
+        };
+        match file {
+            Some(f) => {
+                let r = source::read_file(&f);
+                post(move |ui| match r {
+                    Ok(c) => confirm_binary(ui, c),
+                    Err(e) => ui.toast(format!("{}: {e}", t("Could not open the file")), true),
+                });
+            }
+            // As for music folders: no picker, type the path.
+            None if !picker || asked.elapsed() < std::time::Duration::from_millis(400) => {
+                post(|ui| {
+                    let app = ui.app();
+                    app.set_link_value(slint::SharedString::new());
+                    app.set_link_open(true);
+                })
+            }
+            None => {}
+        }
+    });
+}
+
+fn remove_index(ui: &Rc<Ui>, url: &str) {
+    ui.ctx
+        .update_config(|c| c.online.plugin_indexes.retain(|u| u != url));
+    load_page(ui);
+}
+
+pub fn do_install(ui: &Rc<Ui>) {
+    let Some(p) = ui.plugins.borrow().pending_install.clone() else {
+        return;
+    };
+    let e = match p {
+        Pending::Entry(e) => e,
+        Pending::Index(url) => {
+            close_install(ui);
+            ui.ctx.update_config(|c| {
+                if !c.online.plugin_indexes.contains(&url) {
+                    c.online.plugin_indexes.push(url.clone());
+                }
+            });
+            ui.toast(t("Index added"), false);
+            load_page(ui);
+            return;
+        }
+        Pending::Release(r) => {
+            install_with(ui, move || source::download_release(&r));
+            return;
+        }
+        Pending::Binary(c) => {
+            install_with(ui, move || Ok(c));
+            return;
+        }
     };
     ui.app().set_install_busy(true);
     let (_, local) = index_source(ui);
@@ -2480,19 +2703,66 @@ pub fn do_install(ui: &Ui) {
             ui.plugins.borrow_mut().pending_install = None;
             match r {
                 Ok(cfg) => {
-                    ui.ctx
-                        .update_config(|c| match c.plugins.iter_mut().find(|p| p.id == cfg.id) {
-                            // An update keeps the user's settings.
-                            Some(p) => {
-                                let settings = std::mem::take(&mut p.settings);
-                                *p = cfg.clone();
-                                p.settings = settings;
-                            }
-                            None => c.plugins.push(cfg.clone()),
-                        });
+                    declare(ui, cfg);
                     ui.toast(tf("{name} installed", &[("name", &e.name)]), false);
                 }
                 Err(err) => ui.toast(format!("{}: {err}", e.name), true),
+            }
+            ui.plugins.borrow_mut().rev = None;
+            refresh_catalog_rows(ui);
+        });
+    });
+}
+
+fn close_install(ui: &Ui) {
+    ui.app().set_install_busy(false);
+    ui.app().set_install_open(false);
+    ui.plugins.borrow_mut().pending_install = None;
+}
+
+/// Add an installed plugin's declaration, or replace the one with its id
+/// (an update keeps the user's settings).
+fn declare(ui: &Ui, cfg: ricercar_core::config::PluginConfig) {
+    ui.ctx
+        .update_config(|c| match c.plugins.iter_mut().find(|p| p.id == cfg.id) {
+            Some(p) => {
+                let settings = std::mem::take(&mut p.settings);
+                *p = cfg.clone();
+                p.settings = settings;
+            }
+            None => c.plugins.push(cfg.clone()),
+        });
+}
+
+/// Get the binary (`get` may download it), run it once to learn its id,
+/// install it and declare it.
+fn install_with(
+    ui: &Ui,
+    get: impl FnOnce() -> Result<source::Candidate, catalog::CatalogError> + Send + 'static,
+) {
+    ui.app().set_install_busy(true);
+    let root = catalog::bin_root(&ricercar_core::config::data_dir());
+    let existing = ui.ctx.config.read().unwrap().plugins.clone();
+    std::thread::spawn(move || {
+        let r =
+            get().and_then(|c| source::install(&c, &root, env!("CARGO_PKG_VERSION"), &existing));
+        post(move |ui| {
+            close_install(ui);
+            match r {
+                Ok((cfg, info)) => {
+                    let name = if info.name.trim().is_empty() {
+                        info.id.clone()
+                    } else {
+                        info.name.chars().take(80).collect()
+                    };
+                    ui.plugins.borrow_mut().releases.remove(&cfg.id);
+                    declare(ui, cfg);
+                    ui.toast(tf("{name} installed", &[("name", &name)]), false);
+                }
+                Err(err) => ui.toast(
+                    format!("{}: {err}", t("Could not install the plugin")),
+                    true,
+                ),
             }
             ui.plugins.borrow_mut().rev = None;
             refresh_catalog_rows(ui);
@@ -2526,6 +2796,7 @@ fn remove(ui: &Ui, id: &str) {
             }
         });
     }
+    ui.plugins.borrow_mut().releases.remove(id);
     ui.toast(tf("{name} removed", &[("name", &name_of(ui, id))]), false);
     ui.plugins.borrow_mut().rev = None;
     refresh_catalog_rows(ui);
@@ -2609,7 +2880,10 @@ pub fn wire(ui: &Rc<Ui>) {
         })
     });
     app.on_open_hub(|| open_url("https://github.com/ricercar-player/ricercar-plugins"));
-    app.on_install_confirm(|| with_ui(|ui| do_install(ui)));
+    app.on_plugin_add_link(|link| with_ui(|ui| add_link(ui, &link)));
+    app.on_plugin_add_file(add_file);
+    app.on_catalog_remove_index(|url| with_ui(|ui| remove_index(ui, &url)));
+    app.on_install_confirm(|| with_ui(do_install));
     app.on_install_cancel(|| {
         with_ui(|ui| {
             ui.plugins.borrow_mut().pending_install = None;

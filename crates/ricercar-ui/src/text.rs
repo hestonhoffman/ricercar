@@ -217,6 +217,66 @@ pub fn install_body(name: &str, version: &str, author: &str, host: &str, repo: &
     }
 }
 
+/// Where an installed plugin (or a catalogue entry) comes from, for its row.
+pub fn plugin_origin(o: &ricercar_core::plugin::source::Origin) -> String {
+    use ricercar_core::plugin::catalog::url_host;
+    use ricercar_core::plugin::source::Origin;
+    match o {
+        Origin::Hub => t("community hub").to_string(),
+        Origin::Index(u) => tf(
+            "from {host}",
+            &[("host", &url_host(u).unwrap_or_else(|| u.clone()))],
+        ),
+        Origin::Github(r) => tf("from {host}", &[("host", &format!("github.com/{r}"))]),
+        Origin::Url(u) => tf(
+            "from {host}",
+            &[("host", &url_host(u).unwrap_or_else(|| u.clone()))],
+        ),
+        Origin::File(_) => t("local file").to_string(),
+    }
+}
+
+/// Confirmation of an install from a GitHub repository's latest release.
+pub fn release_body(repo: &str, tag: &str, file: &str, checked: bool) -> String {
+    let args = [("repo", repo), ("tag", tag), ("file", file)];
+    let what = tf(
+        "{file} from the latest release of {repo} ({tag}) will be downloaded, started once to read its name, then run with your permissions. Nobody reviews it, neither the hub nor ricercar.",
+        &args,
+    );
+    let check = if checked {
+        t("ricercar checks the file against the SHA-256 published in the release.")
+    } else {
+        t("The release publishes no checksum: nothing shows the file is the one its author built.")
+    };
+    format!("{what} {check}")
+}
+
+/// Confirmation of an install from a link or a file.
+pub fn binary_body(what: &str, sha256: &str, checked: bool) -> String {
+    let body = tf(
+        "{what} will be copied into ricercar's data folder, started once to read its name, then run with your permissions. Nobody reviews it, neither the hub nor ricercar: only continue if you trust where it comes from.",
+        &[("what", what)],
+    );
+    let body = if checked {
+        format!(
+            "{body} {}",
+            t("Its SHA-256 matches the one published next to it.")
+        )
+    } else {
+        body
+    };
+    format!("{body}\n\nSHA-256: {sha256}")
+}
+
+/// Confirmation before adding another plugin index.
+pub fn index_body(url: &str, count: usize) -> String {
+    let n = count.to_string();
+    tf(
+        "Plugins listed by {url}: {count}. They will appear in the catalogue after the hub's, and their updates will come from this index. Nobody reviews this index or its plugins: only add it if you trust whoever publishes it.",
+        &[("url", url), ("count", &n)],
+    )
+}
+
 /// Warning shown above the confirmation of a plugin update whose binary now
 /// comes from another host than the installed one.
 pub fn host_changed(old: &str, new: &str) -> String {

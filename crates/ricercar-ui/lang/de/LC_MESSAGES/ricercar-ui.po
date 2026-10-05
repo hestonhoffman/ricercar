@@ -49,6 +49,18 @@ msgid "Install"
 msgstr "Installieren"
 
 msgctxt "MainWindow"
+msgid "Add a plugin from a link"
+msgstr "Plugin über einen Link hinzufügen"
+
+msgctxt "MainWindow"
+msgid "Paste a link to a plugin program, to a GitHub repository (its latest release is used), or to a plugin index like the hub's. A path to a file on this computer works too. Nothing is installed or run before you confirm."
+msgstr "Füge einen Link zu einem Plugin-Programm, zu einem GitHub-Repository (dessen neuestes Release verwendet wird) oder zu einem Plugin-Index wie dem des Hubs ein. Ein Pfad zu einer Datei auf diesem Computer geht auch. Nichts wird installiert oder gestartet, bevor du bestätigst."
+
+msgctxt "MainWindow"
+msgid "Continue"
+msgstr "Weiter"
+
+msgctxt "MainWindow"
 msgid "Add a music folder"
 msgstr "Musikordner hinzufügen"
 
@@ -1425,8 +1437,16 @@ msgid "Installed"
 msgstr "Installiert"
 
 msgctxt "PluginsPage"
-msgid "No plugins yet. Install one from the catalogue below, or declare it in config.toml."
-msgstr "Noch keine Plugins. Installiere eins aus dem Katalog unten oder gib es in config.toml an."
+msgid "Add from a link"
+msgstr "Über Link hinzufügen"
+
+msgctxt "PluginsPage"
+msgid "Add a file"
+msgstr "Datei hinzufügen"
+
+msgctxt "PluginsPage"
+msgid "No plugins yet. Install one from the catalogue below, add one from a link or a file, or declare it in config.toml."
+msgstr "Noch keine Plugins. Installiere eines aus dem Katalog unten, füge eines über einen Link oder eine Datei hinzu oder trage es in config.toml ein."
 
 msgctxt "PluginsPage"
 msgid "Sign in"
@@ -1463,6 +1483,10 @@ msgstr "Hub öffnen"
 msgctxt "PluginsPage"
 msgid "Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256."
 msgstr "Einträge verweisen auf die Repositorys ihrer Autoren; ricercar hostet nichts und prüft nur den SHA-256 der Datei."
+
+msgctxt "PluginsPage"
+msgid "Other index"
+msgstr "Weiterer Index"
 
 msgctxt "PluginsPage"
 msgid "Filter plugins"

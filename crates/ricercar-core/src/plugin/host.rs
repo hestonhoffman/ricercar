@@ -222,6 +222,67 @@ fn kill_group(child: &Child) {
     }
 }
 
+/// Start a plugin binary once, with throwaway data and cache directories
+/// under `scratch`, to read what it says it is in `initialize`; then stop
+/// it. Used to identify a plugin installed from a link or a file, after the
+/// user agreed to run it.
+pub(crate) fn probe(
+    command: &std::path::Path,
+    host_version: &str,
+    scratch: &std::path::Path,
+) -> Result<PluginInfo, String> {
+    let data_dir = scratch.join("data");
+    let cache_dir = scratch.join("cache");
+    let _ = std::fs::create_dir_all(&data_dir);
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let mut child = Command::new(command)
+        .env_clear()
+        .envs(plugin_env())
+        .current_dir(scratch)
+        .process_group(0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let (stdin, stdout) = (
+        child.stdin.take().expect("piped"),
+        child.stdout.take().expect("piped"),
+    );
+    let rpc = Rpc::start("probe", stdout, stdin, |_| {});
+    let init = rpc.call(
+        "initialize",
+        json!({
+            "protocol": PROTOCOL,
+            "host": {"name": "ricercar", "version": host_version},
+            "data_dir": data_dir,
+            "cache_dir": cache_dir,
+            "locale": "en-US",
+            "output": OutputInfo::default(),
+            "settings": {},
+        }),
+        DEFAULT_TIMEOUT,
+    );
+    PluginHost::kill(&mut child, &rpc, init.is_ok());
+    let init = init.map_err(|e| match e {
+        CallError::Timeout => "no answer to initialize".to_string(),
+        CallError::Closed => "exited without answering initialize".to_string(),
+        CallError::Rpc(e) => format!("initialize failed: {}", e.message),
+        CallError::Busy => "not reading its input".to_string(),
+    })?;
+    let protocol = init.get("protocol").and_then(Value::as_u64).unwrap_or(0);
+    if protocol != PROTOCOL as u64 {
+        return Err(format!(
+            "speaks protocol {protocol}, ricercar speaks {PROTOCOL}"
+        ));
+    }
+    init.get("plugin")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<PluginInfo>(v).ok())
+        .filter(|i| PluginConfig::valid_id(&i.id))
+        .ok_or_else(|| "initialize did not give a valid plugin id".to_string())
+}
+
 fn map_call_error(e: CallError) -> PluginError {
     match e {
         CallError::Timeout => PluginError::Timeout,

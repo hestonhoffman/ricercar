@@ -49,6 +49,18 @@ msgid "Install"
 msgstr "インストール"
 
 msgctxt "MainWindow"
+msgid "Add a plugin from a link"
+msgstr "リンクからプラグインを追加"
+
+msgctxt "MainWindow"
+msgid "Paste a link to a plugin program, to a GitHub repository (its latest release is used), or to a plugin index like the hub's. A path to a file on this computer works too. Nothing is installed or run before you confirm."
+msgstr "プラグインのプログラム、GitHub リポジトリ（最新リリースを使用）、またはハブと同じ形式のプラグインインデックスへのリンクを貼り付けてください。このコンピューター上のファイルのパスも使えます。確認するまで何もインストール・実行されません。"
+
+msgctxt "MainWindow"
+msgid "Continue"
+msgstr "続ける"
+
+msgctxt "MainWindow"
 msgid "Add a music folder"
 msgstr "音楽フォルダを追加"
 
@@ -1415,8 +1427,16 @@ msgid "Installed"
 msgstr "インストール済み"
 
 msgctxt "PluginsPage"
-msgid "No plugins yet. Install one from the catalogue below, or declare it in config.toml."
-msgstr "プラグインはまだありません。下のカタログからインストールするか、config.toml で宣言してください。"
+msgid "Add from a link"
+msgstr "リンクから追加"
+
+msgctxt "PluginsPage"
+msgid "Add a file"
+msgstr "ファイルを追加"
+
+msgctxt "PluginsPage"
+msgid "No plugins yet. Install one from the catalogue below, add one from a link or a file, or declare it in config.toml."
+msgstr "プラグインはまだありません。下のカタログからインストールするか、リンクやファイルから追加するか、config.toml に記述してください。"
 
 msgctxt "PluginsPage"
 msgid "Sign in"
@@ -1453,6 +1473,10 @@ msgstr "ハブを開く"
 msgctxt "PluginsPage"
 msgid "Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256."
 msgstr "各項目は作者のリポジトリを指しています。ricercar は何もホストせず、確認するのはファイルの SHA-256 のみです。"
+
+msgctxt "PluginsPage"
+msgid "Other index"
+msgstr "他のインデックス"
 
 msgctxt "PluginsPage"
 msgid "Filter plugins"
