@@ -748,8 +748,8 @@ fn mark_fav(ui: &Ui, path: &str, fav: bool) {
 }
 
 pub fn show_in_folder(path: &str) {
-    // A cue track shows its audio file.
-    let path = std::path::PathBuf::from(ricercar_core::cue::file_of(path));
+    // A cue track shows its audio file, a SACD track its image.
+    let path = ricercar_core::meta::on_disk(std::path::Path::new(path)).to_path_buf();
     // A D-Bus round trip (and a file manager starting up) must not freeze
     // the window: talk to it from a thread.
     std::thread::spawn(move || {

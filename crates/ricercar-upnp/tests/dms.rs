@@ -431,3 +431,42 @@ fn cue_tracks_are_served_as_wav_of_their_samples() {
     assert!(bodies == want, "cue parts differ from the file");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn sacd_tracks_are_served_as_wav_of_their_conversion() {
+    use ricercar_audio::dsd::sacd::fixture;
+    let r = rig("dms-sacd", false);
+    let dir = std::env::temp_dir().join(format!("ricercar-upnp-sacd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let image = dir.join("disc.iso");
+    let spec = fixture::Spec::new(false, 0, &[(15, "A"), (30, "B")]);
+    std::fs::write(&image, fixture::image(&spec, fixture::plain_frame)).unwrap();
+    assert_eq!(r.ctl.lib.scan_roots(std::slice::from_ref(&dir)).total, 2);
+
+    let didl = field(&children(r.port(), "tracks"), "Result");
+    let items: Vec<&str> = didl.split("<item ").skip(1).collect();
+    assert_eq!(items.len(), 2);
+    for (n, (item, frames)) in items.iter().zip([15usize, 30]).enumerate() {
+        assert!(
+            item.contains("protocolInfo=\"http-get:*:audio/wav:DLNA.ORG_OP=00"),
+            "{item}"
+        );
+        assert_eq!(attr(item, "<res ", "sampleFrequency"), "88200");
+        let (head, body) = get(r.port(), &media_path(item), "");
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert_eq!(body.len(), 44 + frames * 1176 * 2 * 3, "24-bit, 88.2 kHz");
+        assert_eq!(u32::from_le_bytes(body[24..28].try_into().unwrap()), 88_200);
+        // What the engine converts, sample for sample.
+        let uri = format!("{}#sacd={}", ricercar_core::meta::file_uri(&image), n + 1);
+        let mut src = ricercar_audio::TrackSource::open(&uri).unwrap();
+        let mut want: Vec<u8> = Vec::new();
+        while src.pump().unwrap() {
+            for v in src.pending.drain(..) {
+                want.extend(&v.to_le_bytes()[..3]);
+            }
+        }
+        assert!(body[44..] == want[..], "track {} differs", n + 1);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

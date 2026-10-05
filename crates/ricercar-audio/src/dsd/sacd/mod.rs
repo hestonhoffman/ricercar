@@ -5,6 +5,8 @@
 //! is streamed sector by sector when a track is played. The multichannel
 //! area is listed but not decoded.
 
+#[doc(hidden)]
+pub mod fixture;
 mod stream;
 #[cfg(test)]
 mod tests;
@@ -25,6 +27,21 @@ const MASTER_TOC: u32 = 510;
 const MASTER_TOC_COPIES: [u32; 3] = [510, 520, 530];
 /// SACD frames per second (and per second of time codes).
 pub const FRAMES_PER_SEC: u32 = 75;
+
+/// Marks a track of an image: `<image path>#sacd=<n>` (library key) or
+/// `file:///…/disc.iso#sacd=<n>` (URI; a `#` in the path is
+/// percent-encoded there).
+pub const TRACK_MARK: &str = "#sacd=";
+
+/// Split a track key or URI into the image part and the track number;
+/// `None` for anything else.
+pub fn split_key(s: &str) -> Option<(&str, u32)> {
+    let (image, n) = s.rsplit_once(TRACK_MARK)?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((image, n.parse().ok().filter(|&n| n > 0)?))
+}
 
 /// The two kinds of audio area a disc can carry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

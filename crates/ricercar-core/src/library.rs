@@ -381,8 +381,12 @@ const TRACK_COLS: &str =
 /// Number of columns in `TRACK_COLS`.
 const TRACK_NCOLS: usize = 26;
 
-/// The URI the engine plays: a cue track is its span of the audio file.
+/// The URI the engine plays: a cue track is its span of the audio file,
+/// a SACD track its number in the image.
 fn track_uri(path: &str, cue_start: Option<i64>, cue_end: Option<i64>) -> String {
+    if let Some(uri) = crate::sacd::uri(path) {
+        return uri;
+    }
     match cue_start {
         Some(start) => format!(
             "{}{}",
@@ -549,6 +553,29 @@ impl CueJob {
     }
 }
 
+/// A SACD image whose TOC changed (or is new): indexed as its tracks.
+struct SacdJob {
+    size: i64,
+    mtime: i64,
+    image: ricercar_audio::dsd::sacd::SacdImage,
+}
+
+impl SacdJob {
+    /// (key, size, track) of each track of the stereo area; the image size
+    /// is counted once, on its first track.
+    fn keys(&self) -> Vec<(String, i64, &ricercar_audio::dsd::sacd::SacdTrack)> {
+        self.image
+            .tracks()
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let size = if i == 0 { self.size } else { 0 };
+                (crate::sacd::key(self.image.path(), t.number), size, t)
+            })
+            .collect()
+    }
+}
+
 fn mtime_of(md: &std::fs::Metadata) -> i64 {
     md.modified()
         .ok()
@@ -693,6 +720,7 @@ impl Library {
         let mut seen: HashSet<String> = HashSet::new();
         let mut found: Vec<Scanned> = Vec::new();
         let mut sheets: Vec<(PathBuf, i64)> = Vec::new();
+        let mut images: Vec<Scanned> = Vec::new();
         let mut report = ScanReport::default();
         let mut live_roots: Vec<PathBuf> = Vec::new();
         // Directories the walk could not read: what is under them is kept.
@@ -724,7 +752,8 @@ impl Library {
                     .map(|e| e.to_ascii_lowercase());
                 let Some(ext) = ext else { continue };
                 let is_sheet = ext == "cue";
-                if !is_sheet && !SUPPORTED_EXTS.contains(&ext.as_str()) {
+                let is_image = ext == crate::sacd::EXT;
+                if !is_sheet && !is_image && !SUPPORTED_EXTS.contains(&ext.as_str()) {
                     continue;
                 }
                 let Ok(md) = entry.metadata() else { continue };
@@ -732,11 +761,16 @@ impl Library {
                     sheets.push((path.to_path_buf(), mtime_of(&md)));
                     continue;
                 }
-                found.push(Scanned {
+                let scanned = Scanned {
                     path: path.to_path_buf(),
                     size: md.len() as i64,
                     mtime: mtime_of(&md),
-                });
+                };
+                if is_image {
+                    images.push(scanned);
+                } else {
+                    found.push(scanned);
+                }
             }
         }
 
@@ -769,10 +803,45 @@ impl Library {
                 cue_todo.push(job);
             }
         }
+        // SACD images: an unchanged image keeps its tracks without being
+        // opened; a new or modified one has its TOC read (never its audio).
+        // Other ISO files are not SACD images and are skipped.
+        let mut indexed: HashMap<&str, Vec<&String>> = HashMap::new();
+        for k in known.keys() {
+            if let Some((image, _)) = crate::sacd::split_key(k) {
+                indexed.entry(image).or_default().push(k);
+            }
+        }
+        let mut changed_images: Vec<&Scanned> = Vec::new();
+        for img in &images {
+            let path = img.path.to_string_lossy();
+            let first = crate::sacd::key(&img.path, 1);
+            match indexed.get(path.as_ref()) {
+                Some(keys) if known.get(&first) == Some(&(img.size, img.mtime)) => {
+                    seen.extend(keys.iter().map(|k| (*k).clone()));
+                }
+                _ => changed_images.push(img),
+            }
+        }
+        let sacd_todo: Vec<SacdJob> = changed_images
+            .par_iter()
+            .filter_map(|s| {
+                let image = ricercar_audio::dsd::sacd::SacdImage::open(&s.path).ok()?;
+                (!image.tracks().is_empty()).then_some(SacdJob {
+                    size: s.size,
+                    mtime: s.mtime,
+                    image,
+                })
+            })
+            .collect();
+        for job in &sacd_todo {
+            seen.extend(job.keys().into_iter().map(|k| k.0));
+        }
         report.total = seen.len();
-        self.progress
-            .total
-            .store(todo.len() + cue_todo.len(), Ordering::Relaxed);
+        self.progress.total.store(
+            todo.len() + cue_todo.len() + sacd_todo.len(),
+            Ordering::Relaxed,
+        );
 
         for chunk in todo.chunks(256) {
             let tagged: Vec<(&Scanned, TagInfo)> =
@@ -817,6 +886,28 @@ impl Library {
             let _ = tx.commit();
             drop(conn);
             self.progress.done.fetch_add(chunk.len(), Ordering::Relaxed);
+            self.touch();
+        }
+
+        if !sacd_todo.is_empty() {
+            let mut conn = self.w();
+            if let Ok(tx) = conn.transaction() {
+                for job in &sacd_todo {
+                    for (key, size, t) in job.keys() {
+                        let tags = crate::sacd::track_tags(&job.image, t);
+                        match upsert_tags(&tx, Path::new(&key), &tags, size, job.mtime, None) {
+                            Ok(true) => report.added += 1,
+                            Ok(false) => report.updated += 1,
+                            Err(e) => tracing::warn!("index {key}: {e}"),
+                        }
+                    }
+                }
+                let _ = tx.commit();
+            }
+            drop(conn);
+            self.progress
+                .done
+                .fetch_add(sacd_todo.len(), Ordering::Relaxed);
             self.touch();
         }
 
@@ -1591,10 +1682,14 @@ impl Library {
             .into_iter()
             .filter(|t| !t.is_plugin())
         {
-            // Other players cannot play part of a file: a cue track is a
-            // comment they skip, which `import_m3u` reads back.
+            // Other players cannot play part of a file: a cue or SACD
+            // track is a comment they skip, which `import_m3u` reads back.
             if crate::cue::split_key(&t.path).is_some() {
                 out.push_str(&format!("{CUE_M3U}{}\n", t.path));
+                continue;
+            }
+            if crate::sacd::split_key(&t.path).is_some() {
+                out.push_str(&format!("{SACD_M3U}{}\n", t.path));
                 continue;
             }
             out.push_str(&format!(
@@ -1615,9 +1710,12 @@ impl Library {
         let paths: Vec<String> = text
             .lines()
             .map(str::trim)
-            .filter(|l| !l.is_empty() && (!l.starts_with('#') || l.starts_with(CUE_M3U)))
+            .filter(|l| {
+                !l.is_empty()
+                    && (!l.starts_with('#') || l.starts_with(CUE_M3U) || l.starts_with(SACD_M3U))
+            })
             .map(|l| {
-                if let Some(key) = l.strip_prefix(CUE_M3U) {
+                if let Some(key) = l.strip_prefix(CUE_M3U).or_else(|| l.strip_prefix(SACD_M3U)) {
                     return key.to_string();
                 }
                 let p = crate::meta::uri_to_path(l).unwrap_or_else(|| PathBuf::from(l));
@@ -1638,6 +1736,8 @@ impl Library {
 
 /// M3U comment line holding a cue track's library key.
 const CUE_M3U: &str = "#RICERCAR-CUE:";
+/// Likewise for a track of a SACD image.
+const SACD_M3U: &str = "#RICERCAR-SACD:";
 
 /// Span of a cue track in its audio file (frames) and the sheet's path.
 type CueCols<'a> = (u64, Option<u64>, &'a str);
@@ -2298,6 +2398,129 @@ mod tests {
         lib.export_m3u(pid, &m3u).unwrap();
         let text = std::fs::read_to_string(&m3u).unwrap();
         assert_eq!(text, format!("#EXTM3U\n#RICERCAR-CUE:{key}\n"));
+        let back = lib.import_m3u(&m3u).unwrap();
+        let t = lib.playlist_tracks(back);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].title, "Two");
+    }
+
+    fn write_sacd(path: &Path, tracks: &[(u32, &str)]) {
+        use ricercar_audio::dsd::sacd::fixture;
+        let spec = fixture::Spec::new(false, 1, tracks);
+        std::fs::write(path, fixture::image(&spec, fixture::plain_frame)).unwrap();
+    }
+
+    fn sacd_rig() -> (tempfile::TempDir, PathBuf, Library) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("music");
+        std::fs::create_dir_all(root.join("al")).unwrap();
+        write_sacd(&root.join("al/disc.iso"), &[(75, "One"), (38, "Two")]);
+        std::fs::write(root.join("al/cover.jpg"), b"jpeg").unwrap();
+        // An ISO that is not a SACD image is skipped without a word.
+        std::fs::write(root.join("al/data.iso"), vec![0u8; 600 * 2048]).unwrap();
+        let lib = Library::open(&dir.path().join("db/lib.db")).unwrap();
+        (dir, root, lib)
+    }
+
+    #[test]
+    fn sacd_image_is_indexed_as_its_tracks() {
+        let (_dir, root, lib) = sacd_rig();
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.added, r.total), (2, 2));
+        let image = root.join("al/disc.iso");
+        assert!(!lib.has_path(&image.to_string_lossy()));
+        let albums = lib.albums(AlbumSort::Title);
+        assert_eq!(albums.len(), 1);
+        let al = &albums[0];
+        assert_eq!(
+            (al.title.as_str(), al.artist.as_str()),
+            ("Café Album", "Some Ensemble")
+        );
+        assert_eq!((al.year, al.genre.as_deref()), (Some(2001), Some("Jazz")));
+        assert_eq!(al.duration_ms, 1000 + 506);
+        assert_eq!(al.max_rate, Some(2_822_400));
+        let t = lib.album_tracks(&al.id);
+        let show: Vec<_> = t
+            .iter()
+            .map(|t| {
+                (
+                    t.track,
+                    t.title.as_str(),
+                    t.artist.as_deref(),
+                    t.duration_ms,
+                )
+            })
+            .collect();
+        assert_eq!(
+            show,
+            [
+                (Some(1), "One", Some("Player"), 1000),
+                (Some(2), "Two", Some("Player"), 506),
+            ]
+        );
+        assert_eq!(t[1].path, format!("{}#sacd=2", image.display()));
+        assert_eq!(t[1].uri, format!("{}#sacd=2", file_uri(&image)));
+        assert_eq!(
+            (t[0].codec.as_deref(), t[0].sample_rate, t[0].channels),
+            (Some("SACD"), Some(2_822_400), Some(2))
+        );
+        assert_eq!(lib.search("two").tracks.len(), 1);
+        assert_eq!(
+            lib.stats().size_bytes,
+            std::fs::metadata(&image).unwrap().len(),
+            "size counted once"
+        );
+        // Covers come from the folder; the image itself has none.
+        let p = Path::new(&t[0].path);
+        assert_eq!(crate::meta::on_disk(p), image);
+        assert_eq!(
+            crate::meta::folder_cover(p),
+            Some(root.join("al/cover.jpg"))
+        );
+        assert_eq!(crate::meta::embedded_cover(p), None);
+        assert_eq!(crate::meta::local_lyrics(p), None);
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.added, r.updated, r.removed), (0, 0, 0));
+    }
+
+    #[test]
+    fn changing_or_removing_a_sacd_image_updates_its_tracks() {
+        let (_dir, root, lib) = sacd_rig();
+        lib.scan_roots(std::slice::from_ref(&root));
+        let image = root.join("al/disc.iso");
+        let two = crate::sacd::key(&image, 2);
+        lib.record_play(&two);
+        lib.set_favorite(&two, true);
+        let pid = lib.create_playlist("p");
+        lib.add_to_playlist(pid, std::slice::from_ref(&two));
+
+        // A new image in place of the old one: three tracks.
+        write_sacd(&image, &[(75, "Uno"), (75, "Dos"), (75, "Tres")]);
+        bump_mtime(&image, 5);
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.added, r.updated, r.removed, r.total), (1, 2, 0, 3));
+        let t = lib.track(&two).unwrap();
+        assert_eq!((t.title.as_str(), t.duration_ms), ("Dos", 1000));
+        assert_eq!((t.play_count, t.favorite), (1, true), "stats kept");
+        assert_eq!(lib.playlist_tracks(pid).len(), 1);
+
+        std::fs::remove_file(&image).unwrap();
+        let r = lib.scan_roots(std::slice::from_ref(&root));
+        assert_eq!((r.removed, r.total), (3, 0));
+        assert_eq!(lib.count(), 0);
+    }
+
+    #[test]
+    fn sacd_tracks_in_m3u_round_trip() {
+        let (dir, root, lib) = sacd_rig();
+        lib.scan_roots(std::slice::from_ref(&root));
+        let key = crate::sacd::key(&root.join("al/disc.iso"), 2);
+        let pid = lib.create_playlist("sacd");
+        lib.add_to_playlist(pid, std::slice::from_ref(&key));
+        let m3u = dir.path().join("sacd.m3u8");
+        lib.export_m3u(pid, &m3u).unwrap();
+        let text = std::fs::read_to_string(&m3u).unwrap();
+        assert_eq!(text, format!("#EXTM3U\n#RICERCAR-SACD:{key}\n"));
         let back = lib.import_m3u(&m3u).unwrap();
         let t = lib.playlist_tracks(back);
         assert_eq!(t.len(), 1);

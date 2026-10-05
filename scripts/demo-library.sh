@@ -2,12 +2,12 @@
 # Builds the synthetic demo library used by the headless screenshot tour
 # (RICERCAR_SNAPSHOT) and for manual testing: 12 albums, 59 short FLAC tracks
 # of sine tones at various rates/depths, generated covers, one .lrc file, a
-# 13th album ripped as one FLAC file with a .cue sheet (4 tracks), and a 14th
-# in DSD64 (two DSF files and one DFF).
+# 13th album ripped as one FLAC file with a .cue sheet (4 tracks), a 14th
+# in DSD64 (two DSF files and one DFF) and a 15th as a SACD image (3 tracks).
 #
 #   scripts/demo-library.sh <out-dir>
 #
-# Needs ffmpeg, ImageMagick 7 (`magick`) and cargo (for the DSD files). The album, artist and playlist
+# Needs ffmpeg, ImageMagick 7 (`magick`) and cargo (for the DSD files and the SACD image). The album, artist and playlist
 # names are referenced by crates/ricercar-ui/src/snapshot.rs: keep them in sync.
 set -euo pipefail
 
@@ -98,6 +98,17 @@ for spec in "220|Open Fifth|dsf" "330|Drone in A|dsf" "440|Pure Tone|dff"; do
     album="Pure Fifths" date=2021 genre=Classical tracknumber=$t
   t=$((t + 1)); n=$((n + 1))
 done
+
+# A SACD image (ISO, stereo area, DSD64): three tracks in one file.
+dir="$D/Trio Meridian/Harbour Lights"
+mkdir -p "$dir"
+magick -size 600x600 -seed 41 "plasma:hsl(200,60%,35%)-hsl(30,70%,55%)" \
+  -blur 0x8 -swirl 160 -fill "rgba(255,255,255,0.85)" -pointsize 44 \
+  -gravity southwest -annotate +36+40 "Harbour Lights" "$dir/cover.jpg" </dev/null
+cargo run -q --manifest-path "$root/Cargo.toml" -p ricercar-audio --example sacd_image -- \
+  "$dir/Harbour Lights.iso" "Harbour Lights" "Trio Meridian" \
+  "262:12:Morning Tide" "392:12:Lanterns" "523:12:Last Ferry"
+n=$((n + 3))
 
 printf '[00:02.00]First line of a synthetic lyric\n[00:06.00]Second line, a little longer than the first\n[00:10.50]Third line\n[00:15.00]\n[00:17.00]The chorus comes back again\n[00:22.00]And fades out slowly\n' \
   > "$D/Kaito Mori/Neon Rain/01 Neon Rain.lrc"

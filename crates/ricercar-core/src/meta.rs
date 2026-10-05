@@ -184,18 +184,25 @@ pub fn read_tags(path: &Path) -> TagInfo {
     info
 }
 
-/// The file on disk behind a library path: the audio file of a cue track.
+/// The file on disk behind a library path: the audio file of a cue track,
+/// the image of a SACD track.
 pub fn on_disk(path: &Path) -> &Path {
     match path.to_str() {
-        Some(p) => Path::new(crate::cue::file_of(p)),
+        Some(p) => Path::new(crate::sacd::file_of(crate::cue::file_of(p))),
         None => path,
     }
 }
 
+/// A track that is part of a bigger file (cue sheet, SACD image).
+fn is_part(path: &Path) -> bool {
+    path.to_str()
+        .is_some_and(|p| crate::cue::split_key(p).is_some() || crate::sacd::split_key(p).is_some())
+}
+
 /// Embedded unsynced lyrics or a sidecar `.lrc` next to the file. None for
-/// a cue track: what the file holds is for the whole disc.
+/// a cue or SACD track: what the file holds is for the whole disc.
 pub fn local_lyrics(path: &Path) -> Option<String> {
-    if path.to_str().and_then(crate::cue::split_key).is_some() {
+    if is_part(path) {
         return None;
     }
     let lrc = path.with_extension("lrc");
@@ -211,6 +218,10 @@ pub fn local_lyrics(path: &Path) -> Option<String> {
 
 /// First embedded picture: (bytes, mime).
 pub fn embedded_cover(path: &Path) -> Option<(Vec<u8>, String)> {
+    // A SACD image carries no picture.
+    if path.to_str().and_then(crate::sacd::split_key).is_some() {
+        return None;
+    }
     if is_dsd(on_disk(path)) {
         return ricercar_audio::dsd::probe(on_disk(path)).ok()?.picture;
     }

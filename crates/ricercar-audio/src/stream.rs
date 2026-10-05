@@ -214,8 +214,13 @@ impl TrackSource {
         TrackSource::open_with(uri, DsdMode::Pcm)
     }
 
-    /// Open a track; DSD files go out in `dsd` mode.
+    /// Open a track; DSD files and SACD tracks go out in `dsd` mode.
     pub fn open_with(uri: &str, dsd: DsdMode) -> Result<TrackSource> {
+        if let Some((image, n)) = crate::dsd::sacd::split_key(uri)
+            && let Some(path) = path_from_uri(image)
+        {
+            return TrackSource::open_sacd(uri, &path, n, dsd);
+        }
         let (file_uri, clip) = split_clip(uri);
         let local = path_from_uri(file_uri);
         if let Some(path) = local.as_deref()
@@ -327,7 +332,24 @@ impl TrackSource {
         })?;
         let play = DsdPlayback::new(src, mode, clip.map(|c| (c.start, c.end)))
             .map_err(|e| AudioError::Decode(e.to_string()))?;
-        Ok(TrackSource {
+        Ok(TrackSource::dsd_source(uri, path, play))
+    }
+
+    /// Track `n` of the stereo area of a SACD image (`…/disc.iso#sacd=n`):
+    /// only the TOC is read here, the audio streams as it plays.
+    fn open_sacd(uri: &str, path: &str, n: u32, mode: DsdMode) -> Result<TrackSource> {
+        let img = crate::dsd::sacd::SacdImage::open(path).map_err(|e| match e {
+            AudioError::Io(e) => AudioError::UnsupportedSource(format!("open {path}: {e}")),
+            e => e,
+        })?;
+        let src = img.track_source(n)?;
+        let play =
+            DsdPlayback::new(src, mode, None).map_err(|e| AudioError::Decode(e.to_string()))?;
+        Ok(TrackSource::dsd_source(uri, path, play))
+    }
+
+    fn dsd_source(uri: &str, path: &str, play: DsdPlayback) -> TrackSource {
+        TrackSource {
             duration_ms: play.duration_ms(),
             format: Some(play.pcm_format()),
             dec: Decoding::Dsd(Box::new(play)),
@@ -344,7 +366,7 @@ impl TrackSource {
             skip_to: 0,
             overflow: VecDeque::new(),
             path: Some(path.to_string()),
-        })
+        }
     }
 
     /// How the samples go out to the device.
@@ -473,6 +495,15 @@ impl TrackSource {
             }
         };
         Some(end.saturating_sub(span.start))
+    }
+
+    /// Exact length in frames of `format`, when known up front: a span of
+    /// a file, or a DSD track.
+    pub fn frames(&self) -> Option<u64> {
+        match &self.dec {
+            Decoding::Dsd(d) => d.out_frames(),
+            Decoding::Sym { .. } => self.span_frames(),
+        }
     }
 
     fn file_duration_ms(&self) -> Option<u64> {

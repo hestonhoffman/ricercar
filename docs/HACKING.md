@@ -78,7 +78,8 @@ indexes):
   i32 samples for a `DsdMode`: DoP payloads (`dop.rs`, 16 bits per
   channel), native 32-bit words (`native.rs`), or PCM through the
   decimator (`pcm.rs`, filter design documented there).
-- `TrackSource::open_with(uri, mode)` picks it for `.dsf` / `.dff`. Its
+- `TrackSource::open_with(uri, mode)` picks it for `.dsf` / `.dff` and
+  SACD tracks (below). Its
   `wire()` (`fmt::Wire`: `Pcm`, `Dop`, `NativeDsd`) tells the engine how to
   open the sink (`open` or `open_dsd`), whether to apply gain (never for
   DoP and native) and to set the DoP markers (`dop::mark`, alternation
@@ -90,6 +91,46 @@ indexes):
   feeds the signal path.
 - `dsd::fixture` writes DSF and DFF files from a sigma-delta modulator
   (tests, `examples/dsd_tone.rs` for the demo library).
+
+### SACD images
+
+`ricercar-audio/src/dsd/sacd/` reads SACD disc images (ISO): `SacdImage::
+open` reads the master and area TOCs only (disc text, the stereo area's
+track list and track text); `track_source(n)` streams a track as a
+`DsdSource`, sector by sector, through the DST decoder when the area is
+DST-coded. The multichannel area is listed, not played.
+
+- **Key.** A track's library `path` is `<image path>#sacd=<n>`
+  (`ricercar_core::sacd::key`, `sacd::split_key`, `sacd::file_of`) and its
+  URI the image's `file://` URI plus `#sacd=<n>`. As with cue tracks,
+  everything keyed by path works unchanged, and `meta::on_disk` maps a key
+  to its image (folder covers, show in folder). The image is not listed.
+- **Scan.** `Library::scan_roots` looks at `.iso` files: an image whose
+  first track's size and mtime are unchanged keeps its rows without being
+  opened; a new or modified one has its TOC read (never audio), and an ISO
+  without a SACD master TOC is skipped silently. No schema change: the
+  cue columns stay `NULL`. Metadata (`sacd::track_tags`): track text
+  title / performer / composer, then disc title → album, disc artist →
+  album artist, date, genre, disc number in a set; durations from the TOC
+  (frames of 1/75 s); codec `SACD`, rate 2 822 400, 1 bit.
+- **Playback.** `TrackSource::open_with` sees `#sacd=<n>`, opens the image
+  and hands `track_source(n)` to `DsdPlayback`: the device's DSD mode, the
+  guard and unity gain apply as for DSF. Position, duration and seeks are
+  relative to the track. Consecutive tracks go through the ordinary DSD
+  gapless path: the next track is opened on the pre-open worker (the TOC
+  again, a cheap seek), the sink stays open, the DoP marker phase and the
+  PCM converter's filter state carry on. Tracks are contiguous and whole
+  frames of 1/75 s (a multiple of every DoP and native word), so the
+  output is the area's stream, sample for sample.
+- **Elsewhere.** M3U export writes `#RICERCAR-SACD:<key>`; the UPnP
+  MediaServer serves a track as a WAV of its conversion to 24-bit /
+  88.2 kHz PCM (like a cue track, no Range requests); the signal path's
+  Source hop reads `SACD · DSD64 · 2.8224 MHz · 2 ch · track <n>`.
+- `dsd::sacd::fixture` builds synthetic images (tests,
+  `examples/sacd_image.rs` for the demo library, `examples/sacd_info.rs`
+  to inspect a real one). `RICERCAR_TEST_SACD_ISO=<image>` enables the
+  tests on a real image (`ricercar-audio` reader, `ricercar-core`
+  `tests/sacd.rs`: index, then 3 s of track 2 to the file sink).
 
 ## The UI crate
 
@@ -168,7 +209,7 @@ Run the app against the demo library with a silent sink, without touching the
 real user data:
 
 ```sh
-scripts/demo-library.sh /tmp/rc/music          # 63 tracks, needs ffmpeg + magick
+scripts/demo-library.sh /tmp/rc/music          # 69 tracks, needs ffmpeg + magick
 export XDG_CONFIG_HOME=/tmp/rc/config XDG_DATA_HOME=/tmp/rc/data XDG_CACHE_HOME=/tmp/rc/cache
 ./target/debug/ricercar --device null --no-upnp --no-mpris --library /tmp/rc/music
 ```

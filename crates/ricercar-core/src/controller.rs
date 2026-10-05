@@ -697,7 +697,7 @@ impl Controller {
                 st.status != TransportStatus::Stopped
                     && st
                         .current_uri()
-                        .is_some_and(|u| ricercar_audio::dsd::is_dsd_path(&u)),
+                        .is_some_and(|u| ricercar_audio::dsd::is_dsd_uri(&u)),
                 st.status == TransportStatus::Paused,
                 st.pos_ms,
             )

@@ -71,6 +71,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - FLAC · ALAC · WAV · AIFF · AAC · MP3 · Ogg Vorbis
 - DSD files (DSF, DFF, DST-compressed DFF; DSD64 and up, stereo): DoP or
   native DSD to a `hw:` DAC, bit-perfect, or converted to 24-bit PCM
+- SACD images (ISO, stereo area, plain or DST): played straight from the
+  image the same three ways, gapless from track to track
 - Hardware pause, device hot-switch, clean stop on unplug
 - ReplayGain (track / album / auto) with peak protection (off by default)
 - HTTP streams seek at once with Range requests (sequential fallback);
@@ -87,6 +89,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Playlists with M3U / M3U8 import & export
 - CUE sheets: an album ripped as one file plays as its tracks, gapless and
   sample-exact
+- SACD images: an `.iso` shows as its album, one track per track of the
+  stereo area, with the disc's text (titles, artists, year, genre)
 - Covers: embedded, folder images, or Cover Art Archive
 - Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net
 
@@ -406,6 +410,12 @@ noise; the signal path shows it. Gapless works between DSD tracks played
 the same way; switching between DSD and PCM reopens the device, as a
 rate change does.
 
+SACD images (`.iso` rips of a disc) are read in place: the library lists
+the tracks of the **stereo area** with the disc's text, and each one plays
+through the same DSD path, decoding DST on the fly when the disc uses it.
+The multichannel area is not played. Over UPnP, the MediaServer sends a
+SACD track as a 24-bit / 88.2 kHz WAV of its conversion.
+
 ## ⌨️ Keyboard
 
 | Keys | Action | | Keys | Action |
@@ -685,7 +695,7 @@ unit in `dist/`, and control it from your phone over UPnP / OpenHome.
 - [ ] Optional parametric EQ / convolution (clearly marked non bit-perfect)
 - [x] CUE sheets
 - [x] DSD (DSF/DFF): DoP, native DSD, conversion to PCM
-- [ ] SACD images
+- [x] SACD images (stereo area)
 - [ ] Composer / work views for classical music
 - [x] AppImage
 - [ ] Flatpak

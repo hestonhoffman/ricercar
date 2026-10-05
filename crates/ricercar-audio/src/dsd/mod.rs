@@ -95,6 +95,11 @@ pub fn is_dsd_path(path: &str) -> bool {
     matches!(ext.as_deref(), Some("dsf" | "dff"))
 }
 
+/// A DSD file or a track of a SACD image (path, key or URI).
+pub fn is_dsd_uri(s: &str) -> bool {
+    is_dsd_path(s) || sacd::split_key(s).is_some()
+}
+
 fn bad(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
@@ -222,5 +227,12 @@ mod tests {
         assert_eq!(rate_label(5_644_800), "DSD128");
         assert!(is_dsd_path("/a/b.DSF") && is_dsd_path("x.dff") && !is_dsd_path("x.flac"));
         assert!(is_dsd_path("file:///a/b.dff#t=1,2") && !is_dsd_path("file:///a.dsf/b.wav"));
+        assert!(is_dsd_uri("file:///a/disc.iso#sacd=3") && is_dsd_uri("/a/disc.iso#sacd=12"));
+        assert!(!is_dsd_uri("file:///a/disc.iso") && !is_dsd_uri("/a/b.iso#sacd=x"));
+        assert_eq!(
+            sacd::split_key("/m/#1/d.iso#sacd=7"),
+            Some(("/m/#1/d.iso", 7))
+        );
+        assert_eq!(sacd::split_key("/m/d.iso#sacd=0"), None);
     }
 }

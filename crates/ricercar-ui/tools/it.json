@@ -438,6 +438,7 @@
 "PipeWire default output; {device} not connected": "Uscita predefinita di PipeWire; {device} non connesso",
 "NOT CONNECTED": "NON CONNESSO",
 "CUE track {n}": "Traccia CUE {n}",
+"track {n}": "traccia {n}",
 "DSD": "DSD",
 "DSD output": "Uscita DSD",
 "Convert to PCM": "Converti in PCM",

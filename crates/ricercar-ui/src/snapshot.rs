@@ -176,6 +176,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
     let fugues = album("Fugues & Ricercars");
     let one_take = album("Live in One Take");
     let fifths = album("Pure Fifths");
+    let harbour = album("Harbour Lights");
     let steps: Vec<(&str, Step)> = vec![
         (
             "home",
@@ -356,6 +357,40 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
         ),
         (
             "cue-signal-path",
+            (
+                900,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_np_tab(2);
+                    app.set_now_playing_open(true);
+                }),
+            ),
+        ),
+        (
+            // A SACD image: its stereo area's tracks, played from the image.
+            "sacd-album",
+            (
+                1500,
+                Box::new(move |ui| {
+                    let id = harbour();
+                    let tracks = ui.ctx.lib.album_tracks(&id);
+                    let ctl = ui.ctx.ctl.clone();
+                    ctl.play_library_tracks(
+                        &tracks,
+                        1,
+                        ricercar_core::PlayContext::Album(id.clone()),
+                    );
+                    ctl.pause();
+                    ui.app().set_now_playing_open(false);
+                    ui.navigate(Page::Album, &id, true);
+                    slint::Timer::single_shot(Duration::from_millis(300), move || {
+                        ctl.seek_ms(3_000);
+                    });
+                }),
+            ),
+        ),
+        (
+            "sacd-signal-path",
             (
                 900,
                 Box::new(|ui| {

@@ -115,6 +115,13 @@ impl DsdPlayback {
             .map(|e| (e - self.start.min(e)) * 8000 / self.format.rate as u64)
     }
 
+    /// Frames of `pcm_format` the played range makes.
+    pub fn out_frames(&self) -> Option<u64> {
+        let rate = self.pcm_format().sample_rate as u64;
+        self.end
+            .map(|e| (e - self.start.min(e)) * 8 * rate / self.format.rate as u64)
+    }
+
     /// Read and convert one chunk into `out`; false once the stream is
     /// over (what was left has been flushed into `out`).
     pub fn pump(&mut self, out: &mut VecDeque<i32>) -> io::Result<bool> {

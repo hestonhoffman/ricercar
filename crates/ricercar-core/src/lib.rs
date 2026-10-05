@@ -8,6 +8,7 @@ pub mod library;
 pub mod meta;
 pub mod plugin;
 pub mod profile;
+pub mod sacd;
 #[doc(hidden)]
 pub mod synth;
 pub mod update;

@@ -614,7 +614,13 @@ fn update_chain(ui: &Ui, st: &CtlState) {
         .as_deref()
         .and_then(ricercar_core::cue::split_key)
         .map(|(_, n)| tf("CUE track {n}", &[("n", &n.to_string())]));
-    let src_val = match cue {
+    // A track of a SACD image: "SACD · DSD64 · … · track 2".
+    let sacd = info
+        .path
+        .as_deref()
+        .and_then(ricercar_core::sacd::split_key)
+        .map(|(_, n)| tf("track {n}", &[("n", &n.to_string())]));
+    let src_val = match cue.or(sacd) {
         Some(c) => format!("{src_val} · {c}"),
         None => src_val,
     };

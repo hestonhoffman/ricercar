@@ -122,12 +122,20 @@ fn track_art(base: &str, path: &str) -> String {
 }
 
 fn track_item(id: &str, parent: &str, t: &Track, base: &str) -> String {
-    let info = TrackInfo::from(t);
+    let mut info = TrackInfo::from(t);
     // Served by library path: for a cue track, the key of its part of the
-    // audio file (sent as WAV).
+    // audio file (sent as WAV); for a SACD track, the key of the track in
+    // its image (converted to PCM, sent as WAV).
     let uri = meta::file_uri(std::path::Path::new(&t.path));
     let cue = ricercar_core::cue::split_key(&t.path).is_some();
-    let (protocol_info, size, bitrate) = if cue {
+    let sacd = ricercar_core::sacd::split_key(&t.path).is_some();
+    let (protocol_info, size, bitrate) = if sacd {
+        let rate = ricercar_audio::dsd::pcm::RATES[0];
+        let ch = t.channels.unwrap_or(2);
+        info.sample_rate = Some(rate);
+        info.bits = Some(24);
+        (media::cue_protocol_info(), None, Some(rate * ch as u32 * 3))
+    } else if cue {
         let pcm_rate = match (t.sample_rate, t.channels, t.bits) {
             (Some(r), Some(c), Some(b)) => Some(r * c as u32 * b.div_ceil(8) as u32),
             _ => None,
