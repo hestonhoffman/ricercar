@@ -23,6 +23,7 @@ pub mod id3;
 pub mod native;
 pub mod pcm;
 pub mod play;
+pub mod sacd;
 #[allow(clippy::len_without_is_empty)]
 pub mod source;
 
