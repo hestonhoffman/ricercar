@@ -1,5 +1,6 @@
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
+import { BufferedPart } from "state.slint";
 
 export component Icon inherits Image {
     in property <color> tint: Theme.text2;
@@ -253,6 +254,8 @@ export component SeekBar inherits Rectangle {
     in property <color> fill: Theme.text;
     in property <color> hover-fill: Theme.accent;
     in property <length> thickness: 4px;
+    // received parts of a stream, drawn behind the position
+    in property <[BufferedPart]> buffered;
     out property <bool> dragging: ta.pressed;
     out property <float> preview: ta.pressed || ta.has-hover ? max(0, min(1, ta.mouse-x / self.width)) : value;
     callback seek(float);
@@ -306,6 +309,13 @@ export component SeekBar inherits Rectangle {
         border-radius: self.height / 2;
         background: Theme.line-strong;
         animate height { duration: Theme.quick; }
+        for part in buffered: Rectangle {
+            x: parent.width * part.start;
+            width: parent.width * (part.end - part.start);
+            height: 100%;
+            border-radius: parent.border-radius;
+            background: Theme.text3.with-alpha(0.6);
+        }
         Rectangle {
             x: 0;
             width: parent.width * shown;
@@ -671,6 +681,26 @@ export component TextField inherits Rectangle {
                 root.edited("");
             }
         }
+    }
+}
+
+/// Turning arc: something is loading.
+export component Spinner inherits Rectangle {
+    in property <length> size: 18px;
+    in property <color> tint: Theme.text2;
+    width: size;
+    height: size;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 12 3 A 9 9 0 1 1 3 12";
+        stroke: tint;
+        stroke-width: size / 8;
+        stroke-line-cap: round;
+        fill: transparent;
+        transform-rotation: mod(animation-tick() / 1ms * 0.36, 360) * 1deg;
     }
 }
 

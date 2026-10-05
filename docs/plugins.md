@@ -424,7 +424,10 @@ page, and it has no sidebar section of its own. A plugin that only declares
   no re-encoding, no resampling, no processing. The signal path then reads
   "Source: <plugin> (relayed locally, original codec unchanged)". A relay
   URL that has expired is handled like any other: the host resolves again
-  after an HTTP error. Unknown values count as `direct`.
+  after an HTTP error. Unknown values count as `direct`. While the player
+  waits for bytes (before the first sound, after a seek) it shows a
+  loading state, and the seek bar shows the parts received so far: a relay
+  should answer and start sending quickly, and honour `Range` requests.
 
 **When the host resolves:**
 - on load (`purpose: "play"`);

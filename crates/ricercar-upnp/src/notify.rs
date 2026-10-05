@@ -59,7 +59,7 @@ pub fn affected(ev: &CtlEvent) -> &'static [Svc] {
         CtlEvent::VolumeChanged => &[Svc::Rcs, Svc::OhVolume],
         CtlEvent::Seeked(_) => &[Svc::OhTime],
         CtlEvent::StreamTitle(_) => &[Svc::OhInfo],
-        CtlEvent::Played(_) | CtlEvent::Error(_) => &[],
+        CtlEvent::Played(_) | CtlEvent::Error(_) | CtlEvent::Buffering => &[],
         CtlEvent::TrackChanged | CtlEvent::StatusChanged(_) | CtlEvent::QueueChanged => &[
             Svc::Avt,
             Svc::OhPlaylist,

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender as CbSender, TryRecvError};
 
+use crate::buffering::Monitor;
 use crate::device::{DeviceInfo, DeviceKind};
 use crate::dsd::{DsdFormat, DsdMode, dop};
 use crate::error::AudioError;
@@ -87,6 +88,19 @@ pub enum EngineEvent {
     /// Title announced in-band by an internet radio (ICY metadata).
     StreamTitle {
         title: String,
+    },
+    /// The engine has been waiting for a network source for a moment
+    /// (before its first sample, after a seek, on underrun), or plays again.
+    Buffering {
+        uri: String,
+        waiting: bool,
+    },
+    /// Byte ranges of a spooled HTTP body downloaded so far (sorted,
+    /// half-open), sent when they change, a few times a second at most.
+    Buffered {
+        uri: String,
+        ranges: Vec<(u64, u64)>,
+        total: u64,
     },
     Error {
         message: String,
@@ -263,6 +277,7 @@ pub fn spawn_player_with_sink(sink: Box<dyn AudioSink>) -> PlayerHandle {
     let engine = Engine {
         device,
         sink,
+        monitor: Monitor::spawn(hub.clone()),
         hub: hub.clone(),
         state: state.clone(),
         status: TransportStatus::Stopped,
@@ -411,6 +426,8 @@ const POSITION_EVERY: Duration = Duration::from_millis(250);
 struct Engine {
     device: DeviceInfo,
     sink: Box<dyn AudioSink>,
+    /// Loading state and download progress of network sources.
+    monitor: Arc<Monitor>,
     hub: Arc<EventHub>,
     state: Arc<Mutex<PlayerShared>>,
     /// Authoritative transport status (mirrored into `state`).
@@ -430,6 +447,12 @@ struct Engine {
     playing_dsd: Option<DsdChain>,
     /// DoP marker alternation, carried across tracks.
     dop_phase: bool,
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.monitor.stop();
+    }
 }
 
 impl Engine {
@@ -508,6 +531,7 @@ impl Engine {
                         return self.sink_failed(e);
                     }
                     self.rewind_dropped();
+                    self.monitor.resumed();
                     self.set_status(TransportStatus::Paused);
                 }
             }
@@ -614,6 +638,8 @@ impl Engine {
     }
 
     fn end_current(&mut self, reason: EndReason) {
+        self.monitor.unfollow();
+        self.monitor.resumed();
         if let Some(src) = self.current.take() {
             self.hub.publish(EngineEvent::TrackEnded {
                 uri: src.uri,
@@ -632,6 +658,8 @@ impl Engine {
         }
         self.sink.close();
         self.current = None;
+        self.monitor.unfollow();
+        self.monitor.resumed();
         self.playing_dsd = None;
         self.pos_frames = 0;
         {
@@ -815,6 +843,7 @@ impl Engine {
             uri: src.uri.clone(),
             format: fmt,
         });
+        self.monitor.follow(&src.uri, src.spool());
         self.current = Some(src);
     }
 
@@ -822,6 +851,7 @@ impl Engine {
         self.next = None;
         lock(&self.state).next_uri = None;
         self.end_current(EndReason::Replaced);
+        self.monitor.waiting(&uri);
         let Some(mut src) = self.open_track(&uri) else {
             return self.go_stopped(false);
         };
@@ -836,6 +866,7 @@ impl Engine {
         let Some(src) = self.current.as_mut().filter(|s| s.seekable) else {
             return;
         };
+        self.monitor.waiting(&src.uri);
         let res = catch_unwind(AssertUnwindSafe(|| src.seek_ms(ms))).unwrap_or_else(|p| {
             Err(AudioError::Decode(format!(
                 "decoder fault: {}",
@@ -852,6 +883,10 @@ impl Engine {
                 self.emit_position();
             }
             Err(e) => tracing::warn!("seek to {ms} ms failed: {e}"),
+        }
+        // Playing, the wait goes on until audio comes out.
+        if self.status != TransportStatus::Playing {
+            self.monitor.resumed();
         }
     }
 
@@ -881,6 +916,7 @@ impl Engine {
         let Some(src) = self.current.as_mut() else {
             return;
         };
+        self.monitor.waiting(&src.uri);
         let pumped = catch_unwind(AssertUnwindSafe(|| src.pump())).unwrap_or_else(|p| {
             Err(AudioError::Decode(format!(
                 "decoder fault: {}",
@@ -895,6 +931,7 @@ impl Engine {
         }
 
         if !src.pending.is_empty() {
+            self.monitor.resumed();
             let Some(fmt) = src.format else { return };
             // A chained stream may change format mid-track.
             if self.sink.opened_format() != Some(fmt) || self.wire != src.wire() {
@@ -948,12 +985,18 @@ impl Engine {
         lock(&self.state).next_uri = None;
         let next = match self.next.take() {
             Some((NextSource::Open(t), opts)) => Some((*t, opts)),
-            Some((NextSource::Opening(uri, rx), opts)) => match rx.recv() {
-                Ok(r) => self.accept(r),
-                Err(_) => self.open_track(&uri),
+            Some((NextSource::Opening(uri, rx), opts)) => {
+                self.monitor.waiting(&uri);
+                match rx.recv() {
+                    Ok(r) => self.accept(r),
+                    Err(_) => self.open_track(&uri),
+                }
+                .map(|t| (t, opts))
             }
-            .map(|t| (t, opts)),
-            Some((NextSource::Pending(uri), opts)) => self.open_track(&uri).map(|t| (t, opts)),
+            Some((NextSource::Pending(uri), opts)) => {
+                self.monitor.waiting(&uri);
+                self.open_track(&uri).map(|t| (t, opts))
+            }
             None => None,
         };
         let Some((mut src, opts)) = next else {

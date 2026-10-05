@@ -31,6 +31,8 @@ pub struct TrackSource {
     pub seekable: bool,
     time_base: Option<TimeBase>,
     titles: Option<crossbeam_channel::Receiver<String>>,
+    /// Download progress of a spooled HTTP body.
+    spool: Option<http::SpoolWatch>,
     /// Sample rate announced by the container (before any decode).
     rate: Option<u32>,
     /// Range of the file played as this track, in frames (cue sheets).
@@ -228,14 +230,14 @@ impl TrackSource {
         {
             return TrackSource::open_dsd(uri, path, clip, dsd);
         }
-        let (src, seekable, titles): (Box<dyn MediaSource>, bool, _) =
+        let (src, seekable, titles, spool): (Box<dyn MediaSource>, bool, _, _) =
             if let Some(path) = local.clone() {
                 let file = std::fs::File::open(&path)
                     .map_err(|e| AudioError::UnsupportedSource(format!("open {path}: {e}")))?;
-                (Box::new(file), true, None)
+                (Box::new(file), true, None, None)
             } else if uri.starts_with("http://") || uri.starts_with("https://") {
                 let h = http::open(uri)?;
-                (h.source, h.seekable, h.titles)
+                (h.source, h.seekable, h.titles, h.spool)
             } else {
                 return Err(AudioError::UnsupportedSource(redact_url(uri)));
             };
@@ -310,6 +312,7 @@ impl TrackSource {
             seekable,
             time_base: tb,
             titles,
+            spool,
             rate,
             span,
             skip_to: 0,
@@ -361,6 +364,7 @@ impl TrackSource {
             seekable: true,
             time_base: None,
             titles: None,
+            spool: None,
             rate: None,
             span: None,
             skip_to: 0,
@@ -692,6 +696,11 @@ impl TrackSource {
     /// new one arrived since the last call.
     pub fn take_stream_title(&mut self) -> Option<String> {
         self.titles.as_ref().and_then(|rx| rx.try_iter().last())
+    }
+
+    /// Download progress, for a source spooled from HTTP.
+    pub fn spool(&self) -> Option<http::SpoolWatch> {
+        self.spool.clone()
     }
 
     /// Seek (seekable sources only). Returns the position actually reached:

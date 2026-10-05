@@ -75,8 +75,9 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   image the same three ways, gapless from track to track
 - Hardware pause, device hot-switch, clean stop on unplug
 - ReplayGain (track / album / auto) with peak protection (off by default)
-- HTTP streams seek at once with Range requests (sequential fallback);
-  internet radio with live titles
+- HTTP streams seek at once with Range requests (sequential fallback),
+  with a loading spinner while data is awaited and the received parts
+  shown on the seek bar; internet radio with live titles
 
 </td>
 <td width="50%" valign="top">

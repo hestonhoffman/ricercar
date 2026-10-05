@@ -74,8 +74,6 @@ pub struct PluginsView {
     search_local: Option<LocalResults>,
     search: Vec<SearchPart>,
     search_serial: u64,
-    /// Item being resolved and since when (loading state after 300 ms).
-    resolving: Option<(u64, Instant)>,
     /// Community catalogue as last read, and the read in flight.
     catalog: Vec<catalog::Entry>,
     catalog_serial: u64,
@@ -253,24 +251,8 @@ pub fn name_of(ui: &Ui, id: &str) -> String {
 
 // ------------------------------------------------------------ polling
 
-/// From the player tick: follow plugin status changes and the resolving
-/// state of the current item.
+/// From the player tick: follow plugin status changes.
 pub fn poll(ui: &Rc<Ui>) {
-    let resolving = ui.ctx.ctl.lock().resolving;
-    let show = {
-        let mut pv = ui.plugins.borrow_mut();
-        pv.resolving = match (resolving, pv.resolving) {
-            (Some(id), Some((old, since))) if id == old => Some((old, since)),
-            (Some(id), _) => Some((id, Instant::now())),
-            (None, _) => None,
-        };
-        pv.resolving
-            .is_some_and(|(_, since)| since.elapsed().as_millis() >= 300)
-    };
-    if ui.app().get_resolving() != show {
-        ui.app().set_resolving(show);
-    }
-
     let rev = host(ui).revision();
     if ui.plugins.borrow().rev == Some(rev) {
         return;

@@ -40,6 +40,8 @@ pub struct HttpSource {
     pub seekable: bool,
     /// Stream titles parsed from ICY metadata (internet radio).
     pub titles: Option<Receiver<String>>,
+    /// What a spooled body has downloaded so far.
+    pub spool: Option<SpoolWatch>,
 }
 
 pub fn open(uri: &str) -> Result<HttpSource> {
@@ -67,17 +69,23 @@ pub fn open(uri: &str) -> Result<HttpSource> {
     let body = resp.body;
 
     match len.filter(|&n| n <= spool_limit(free_space(&spool_dir()))) {
-        Some(len) => Ok(HttpSource {
-            source: Box::new(SpoolReader::start(body, len, origin)?),
-            seekable: true,
-            titles: None,
-        }),
+        Some(len) => {
+            let reader = SpoolReader::start(body, len, origin)?;
+            let spool = reader.watch();
+            Ok(HttpSource {
+                source: Box::new(reader),
+                seekable: true,
+                titles: None,
+                spool: Some(spool),
+            })
+        }
         None => {
             let (source, titles) = LiveReader::start(body, metaint);
             Ok(HttpSource {
                 source: Box::new(source),
                 seekable: false,
                 titles,
+                spool: None,
             })
         }
     }
@@ -190,6 +198,10 @@ struct Progress {
     want: Option<u64>,
     /// Where the reader last needed data: holes after it are filled first.
     reading: u64,
+    /// The offset the reader is blocked on right now.
+    blocked: Option<u64>,
+    /// Bumped whenever `have` grows.
+    seq: u64,
     done: bool,
     error: Option<String>,
 }
@@ -305,7 +317,11 @@ impl Fetcher {
                 self.file
                     .write_all_at(&buf[..n as usize], at)
                     .map_err(|e| format!("spool write: {e}"))?;
-                lock(&self.sh.progress).have.insert(at, at + n);
+                {
+                    let mut p = lock(&self.sh.progress);
+                    p.have.insert(at, at + n);
+                    p.seq += 1;
+                }
                 self.sh.cv.notify_all();
                 at += n;
                 fetched += n;
@@ -385,15 +401,18 @@ impl SpoolReader {
         p.reading = pos;
         loop {
             if let Some(end) = p.have.run_end(pos) {
+                p.blocked = None;
                 return Ok(end - pos);
             }
             if p.done {
+                p.blocked = None;
                 return match &p.error {
                     Some(e) => Err(io::Error::other(e.clone())),
                     None => Ok(0),
                 };
             }
             p.want = Some(pos);
+            p.blocked = Some(pos);
             p = self
                 .shared
                 .cv
@@ -401,6 +420,50 @@ impl SpoolReader {
                 .map(|(g, _)| g)
                 .unwrap_or_else(|e| e.into_inner().0);
         }
+    }
+
+    /// A view of the download, for progress reporting.
+    pub fn watch(&self) -> SpoolWatch {
+        SpoolWatch {
+            shared: self.shared.clone(),
+            len: self.len,
+        }
+    }
+}
+
+/// What a spool holds, seen from another thread.
+#[derive(Clone)]
+pub struct SpoolWatch {
+    shared: Arc<Shared>,
+    len: u64,
+}
+
+/// Downloaded ranges of a spooled body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fill {
+    /// Changes whenever `ranges` does.
+    pub seq: u64,
+    /// Sorted, disjoint, half-open byte ranges.
+    pub ranges: Vec<(u64, u64)>,
+    pub len: u64,
+    /// The download is over (complete, failed or cancelled).
+    pub done: bool,
+}
+
+impl SpoolWatch {
+    pub fn fill(&self) -> Fill {
+        let p = lock(&self.shared.progress);
+        Fill {
+            seq: p.seq,
+            ranges: p.have.0.clone(),
+            len: self.len,
+            done: p.done,
+        }
+    }
+
+    /// The offset a read is waiting for, if one is.
+    pub fn blocked_at(&self) -> Option<u64> {
+        lock(&self.shared.progress).blocked
     }
 }
 

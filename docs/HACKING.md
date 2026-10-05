@@ -237,6 +237,12 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
   always start from the same state. `RICERCAR_SNAPSHOT_TOUR=state` is the
   exception: it prints the restored state, changes it and quits; run it twice
   to check that the state survives a restart.
+- `RICERCAR_SNAPSHOT_TOUR=stream` with `RICERCAR_SNAPSHOT_URL=<http URL>`
+  plays that stream and captures the player bar while it loads, plays, and
+  after seeks ahead and back: point it at a local server that answers late
+  and slowly to see the loading spinner and the received parts on the seek
+  bar (`EngineEvent::Buffering` / `Buffered`, `CtlState::buffering` /
+  `buffered`).
 
 ### Plugins
 

@@ -10,7 +10,7 @@ import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays
 import { BrowsePage, SignInDialog, PluginSettingsDialog, PluginsPage } from "plugins.slint";
 
 export { App, Page, Theme, TrackMenu }
-export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, PlaylistTarget, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, MenuEntry, ItemAction } from "state.slint";
+export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, PlaylistTarget, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, BufferedPart, MenuEntry, ItemAction } from "state.slint";
 
 export component MainWindow inherits Window {
     title: App.has-track ? App.title + " — " + App.artist : "ricercar";

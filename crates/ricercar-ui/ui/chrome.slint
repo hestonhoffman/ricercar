@@ -2,7 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, ChainHop } from "state.slint";
-import { Icon, IconButton, Cover, SeekBar, TextField, Badge, FocusRing } from "widgets.slint";
+import { Icon, IconButton, Cover, SeekBar, Spinner, TextField, Badge, FocusRing } from "widgets.slint";
 
 // One line of text that, when wider than its box, scrolls to its end after
 // a short pause.
@@ -560,9 +560,13 @@ export component PlayerBar inherits Rectangle {
                     animate transform-scale { duration: Theme.quick; easing: ease-out; }
                     forward-focus: pfs;
                     accessible-role: button;
-                    accessible-label: App.playing ? @tr("Pause") : @tr("Play");
+                    accessible-label: App.loading ? @tr("Loading…") : App.playing ? @tr("Pause") : @tr("Play");
                     accessible-action-default => { App.play-pause(); }
-                    Icon {
+                    if App.loading: Spinner {
+                        size: 20px;
+                        tint: Theme.bg;
+                    }
+                    if !App.loading: Icon {
                         x: (parent.width - self.width) / 2 + (App.playing ? 0 : 1px);
                         source: App.playing ? Icons.pause-fill : Icons.play-fill;
                         size: 18px;
@@ -623,6 +627,7 @@ export component PlayerBar inherits Rectangle {
                     label: @tr("Position");
                     enabled: App.has-track && App.dur-ms > 0;
                     value: App.dur-ms > 0 ? App.pos-ms / App.dur-ms : 0;
+                    buffered: App.buffered;
                     seek(v) => { App.seek(v * App.dur-ms); }
                 }
                 Text {
@@ -635,7 +640,7 @@ export component PlayerBar inherits Rectangle {
                 }
             }
             // The signal path, always in view: source → processing → format → device.
-            if App.has-track && (App.chain-short.length > 0 || App.resolving): HorizontalLayout {
+            if App.has-track && App.chain-short.length > 0: HorizontalLayout {
                 alignment: center;
                 chain := Rectangle {
                     height: 20px;
@@ -652,13 +657,7 @@ export component PlayerBar inherits Rectangle {
                             border-radius: 3.5px;
                             background: !App.chain-known ? Theme.text3 : App.bitperfect ? Theme.good : Theme.warn;
                         }
-                        if App.resolving: Text {
-                            text: @tr("Loading…");
-                            font-size: Theme.fs-xs;
-                            color: Theme.text2;
-                            vertical-alignment: center;
-                        }
-                        for hop[i] in App.resolving ? [] : App.chain-short: HorizontalLayout {
+                        for hop[i] in App.chain-short: HorizontalLayout {
                             spacing: 6px;
                             if i > 0: Icon {
                                 y: (parent.height - self.height) / 2;

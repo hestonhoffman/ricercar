@@ -414,17 +414,165 @@ fn served(log: &Arc<Mutex<Vec<Served>>>) -> Vec<Served> {
     log.lock().unwrap().clone()
 }
 
+/// A gate that stays open once opened.
+#[derive(Clone, Default)]
+struct Latch(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+impl Latch {
+    fn open(&self) {
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
+    }
+    fn wait(&self) {
+        let mut open = self.0.0.lock().unwrap();
+        while !*open {
+            open = self.0.1.wait(open).unwrap();
+        }
+    }
+    fn wait_for(&self, d: Duration) -> bool {
+        let open = self.0.0.lock().unwrap();
+        *self.0.1.wait_timeout_while(open, d, |o| !*o).unwrap().0
+    }
+}
+
+/// A server driven by the test rather than by timing.
+struct Gated {
+    uri: String,
+    log: Arc<Mutex<Vec<Served>>>,
+    /// Lets the first response go on (or start, without a head).
+    release: Latch,
+    /// Lets the last chunk of the first range go out.
+    tail: Latch,
+    /// Lets the later ranges (hole fills) go out.
+    fill: Latch,
+}
+
+/// Serve `body` with ranges honoured. The first response sends its
+/// headers and `head` bytes (nothing at all when `None`), then waits for
+/// `release`; it then sends a chunk at a time until a range request comes
+/// in, and stops there. The first range request also waits for `release`,
+/// then is served whole but for its last chunk, which waits for `tail`.
+/// Later ranges (hole fills) wait for `fill`. Whichever way the client goes, a read far
+/// ahead waits until `release`.
+fn serve_gated(body: Vec<u8>, head: Option<usize>) -> Gated {
+    let body = Arc::new(body);
+    let log = Arc::new(Mutex::new(Vec::<Served>::new()));
+    let (release, tail, fill) = (Latch::default(), Latch::default(), Latch::default());
+    let ranged = Latch::default();
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let (lg, rel, tl, fil) = (log.clone(), release.clone(), tail.clone(), fill.clone());
+    thread::spawn(move || {
+        for stream in l.incoming().flatten() {
+            let (body, log) = (body.clone(), lg.clone());
+            let (release, tail, fill) = (rel.clone(), tl.clone(), fil.clone());
+            let ranged = ranged.clone();
+            thread::spawn(move || {
+                let mut stream = stream;
+                let req = read_head(&mut stream);
+                let from = req
+                    .lines()
+                    .find_map(|l| l.strip_prefix("range: bytes="))
+                    .and_then(|r| r.trim().trim_end_matches('-').parse::<u64>().ok());
+                let (idx, first_range) = {
+                    let mut log = log.lock().unwrap();
+                    let first_range = from.is_some() && log.iter().all(|r| r.from.is_none());
+                    log.push(Served { from, sent: 0 });
+                    (log.len() - 1, first_range)
+                };
+                let len = body.len() as u64;
+                let send = |stream: &mut std::net::TcpStream, c: &[u8]| {
+                    let ok = stream.write_all(c).is_ok();
+                    if ok {
+                        log.lock().unwrap()[idx].sent += c.len() as u64;
+                    }
+                    ok
+                };
+                let Some(f) = from else {
+                    let headers = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nAccept-Ranges: bytes\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+                    );
+                    let Some(n) = head else {
+                        release.wait();
+                        let _ = stream.write_all(headers.as_bytes()).is_ok()
+                            && send(&mut stream, &body);
+                        return;
+                    };
+                    if stream.write_all(headers.as_bytes()).is_err()
+                        || !send(&mut stream, &body[..n])
+                    {
+                        return;
+                    }
+                    release.wait();
+                    for c in body[n..].chunks(16 * 1024) {
+                        if !send(&mut stream, c) || ranged.wait_for(Duration::from_millis(20)) {
+                            return;
+                        }
+                    }
+                    return;
+                };
+                if first_range {
+                    ranged.open();
+                    release.wait();
+                } else {
+                    fill.wait();
+                }
+                let part = &body[f as usize..];
+                let headers = format!(
+                    "HTTP/1.1 206 Partial Content\r\nAccept-Ranges: bytes\r\nContent-Range: bytes {f}-{}/{len}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    len - 1,
+                    part.len()
+                );
+                if stream.write_all(headers.as_bytes()).is_err() {
+                    return;
+                }
+                let last = part.len().saturating_sub(16 * 1024);
+                if !send(&mut stream, &part[..last]) {
+                    return;
+                }
+                if first_range {
+                    tail.wait();
+                }
+                send(&mut stream, &part[last..]);
+                let _ = stream.flush();
+            });
+        }
+    });
+    Gated {
+        uri: format!("http://127.0.0.1:{port}/big.wav"),
+        log,
+        release,
+        tail,
+        fill,
+    }
+}
+
 #[test]
 fn range_seek_fetches_from_the_seek_point() {
     let data = pattern(4 * MIB);
     let seek = 3 * MIB as u64;
-    let (uri, log) = serve_ranges(data.clone(), Ranges::Honour);
-    let mut src = ricercar_audio::http::open(&uri).unwrap().source;
-    src.seek(SeekFrom::Start(seek)).unwrap();
-    let mut tail = Vec::new();
-    src.read_to_end(&mut tail).unwrap();
+    let g = serve_gated(data.clone(), Some(64 * 1024));
+    g.tail.open();
+    let opened = ricercar_audio::http::open(&g.uri).unwrap();
+    let watch = opened.spool.expect("spooled");
+    let mut src = opened.source;
+    // Nothing past the head is sent before the reader waits at the seek
+    // point.
+    let reader = thread::spawn(move || {
+        src.seek(SeekFrom::Start(seek)).unwrap();
+        let mut tail = Vec::new();
+        src.read_to_end(&mut tail).unwrap();
+        (src, tail)
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while watch.blocked_at() != Some(seek) {
+        assert!(Instant::now() < deadline, "reader never waited at the seek");
+        thread::sleep(Duration::from_millis(2));
+    }
+    g.release.open();
+    let (mut src, tail) = reader.join().unwrap();
     assert!(tail == data[seek as usize..], "tail differs");
-    let s = served(&log);
+    let s = served(&g.log);
     assert_eq!(s[0].from, None);
     assert!(s[0].sent < seek, "first response ran to the seek: {s:?}");
     assert_eq!(s[1].from, Some(seek), "{s:?}");
@@ -436,23 +584,35 @@ fn range_seek_fetches_from_the_seek_point() {
     src.read_exact(&mut again).unwrap();
     assert!(again == data[seek as usize + 12_345..][..100_000]);
     assert!(
-        served(&log)
+        served(&g.log)
             .iter()
             .all(|r| r.from.is_none_or(|f| f <= seek)),
         "{:?}",
-        served(&log)
+        served(&g.log)
     );
 
-    // The hole before the seek point is filled; the file ends up whole.
+    // The download stopped where the reader jumped: one hole before the
+    // seek point, nothing fetched twice.
+    let have = watch.fill().ranges;
+    assert_eq!(have.last(), Some(&(seek, data.len() as u64)), "{have:?}");
+    let hole = match have[..] {
+        [(0, end), _] => end,
+        [_] => 0,
+        _ => panic!("{have:?}"),
+    };
+    assert!(hole < seek);
+
+    // The hole is filled from where it starts; the file ends up whole.
+    g.fill.open();
     src.seek(SeekFrom::Start(0)).unwrap();
     let mut all = Vec::new();
     src.read_to_end(&mut all).unwrap();
     assert!(all == data, "whole file differs");
-    let s = served(&log);
+    let s = served(&g.log);
     assert_eq!(s.len(), 3, "{s:?}");
-    assert!(s[2].from.is_some_and(|f| f < seek), "{s:?}");
-    let total: u64 = s.iter().map(|r| r.sent).sum();
-    assert!(total <= data.len() as u64 + MIB as u64, "{s:?}");
+    assert_eq!(s[2].from, Some(hole), "{s:?}");
+    let fill = watch.fill();
+    assert_eq!(fill.ranges, [(0, data.len() as u64)]);
 }
 
 #[test]
@@ -573,6 +733,147 @@ fn range_seek_plays_bit_exact() {
         s.iter()
             .any(|r| r.from.is_some_and(|f| f <= seek_at && f > 2 * MIB as u64)),
         "{s:?}"
+    );
+}
+
+// ---------------------------------------------------------------- buffering
+
+#[test]
+fn slow_first_byte_reports_buffering_until_audio_flows() {
+    let g = serve_gated(fixture("tone_16_441.flac"), None);
+    let (h, out) = file_player("slow-first");
+    let sub = h.subscribe();
+    let asked = Instant::now();
+    h.load(&g.uri);
+    let mut seen = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut stopped = false;
+    while !stopped && Instant::now() < deadline {
+        match sub.0.recv_timeout(Duration::from_millis(200)) {
+            Ok(EngineEvent::Buffering { uri, waiting }) => {
+                assert_eq!(uri, g.uri);
+                if waiting {
+                    assert!(asked.elapsed() >= Duration::from_millis(300));
+                    // Nothing was sent yet: now the server answers.
+                    g.release.open();
+                }
+                seen.push(format!("buffering {waiting}"));
+            }
+            Ok(EngineEvent::TrackStarted { .. }) => seen.push("started".into()),
+            Ok(EngineEvent::Status {
+                status: TransportStatus::Stopped,
+            }) => stopped = true,
+            Ok(EngineEvent::Error { message, .. }) => panic!("engine error: {message}"),
+            _ => {}
+        }
+    }
+    assert!(stopped, "never finished: {seen:?}");
+    assert_eq!(
+        seen[..3],
+        ["buffering true", "started", "buffering false"],
+        "{seen:?}"
+    );
+    assert_eq!(seen.last().map(String::as_str), Some("buffering false"));
+    assert_eq!(std::fs::read(&out).unwrap(), golden());
+}
+
+#[test]
+fn fast_stream_reports_no_buffering() {
+    let body = fixture("tone_16_441.flac");
+    let base = serve_fn(move |_, _| {
+        with_headers(
+            "HTTP/1.1 200 OK",
+            &[
+                format!("Content-Length: {}", body.len()),
+                "Accept-Ranges: bytes".into(),
+            ],
+            &body,
+        )
+    });
+    let (h, out) = file_player("fast");
+    let sub = h.subscribe();
+    h.load(format!("{base}/tone.flac"));
+    let mut waits = 0;
+    let mut fills = Vec::new();
+    assert!(wait_stopped(&sub, |ev| match ev {
+        EngineEvent::Buffering { .. } => waits += 1,
+        EngineEvent::Buffered { ranges, total, .. } => fills.push((ranges.clone(), *total)),
+        _ => {}
+    }));
+    assert_eq!(waits, 0, "a fast stream never shows a wait");
+    assert!(!fills.is_empty(), "download progress reported");
+    assert_eq!(std::fs::read(&out).unwrap(), golden());
+}
+
+#[test]
+fn local_file_reports_nothing_new() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone_16_441.flac");
+    let (h, _out) = file_player("local-quiet");
+    let sub = h.subscribe();
+    h.load(format!("file://{}", path.display()));
+    let mut extra = 0;
+    assert!(wait_stopped(&sub, |ev| {
+        if matches!(
+            ev,
+            EngineEvent::Buffering { .. } | EngineEvent::Buffered { .. }
+        ) {
+            extra += 1;
+        }
+    }));
+    assert_eq!(extra, 0);
+}
+
+#[test]
+fn seek_into_a_hole_reports_buffering_and_the_received_ranges() {
+    let pcm = pattern(44_100 * 4 * 24);
+    let body = wav(&pcm);
+    let len = body.len() as u64;
+    let head = 256 * 1024;
+    let g = serve_gated(body, Some(head));
+    let (h, out) = file_player("hole");
+    let sub = h.subscribe();
+    h.load(&g.uri);
+    h.seek_ms(20_000);
+    let seek_at = 44 + 20 * 44_100 * 4u64;
+    let mut waits = Vec::new();
+    let mut fills: Vec<Vec<(u64, u64)>> = Vec::new();
+    let mut hole = None;
+    assert!(wait_stopped(&sub, |ev| match ev {
+        EngineEvent::Buffering { waiting, .. } => {
+            waits.push(*waiting);
+            // The engine waits at the seek point: let the download go on.
+            if *waiting {
+                g.release.open();
+            }
+        }
+        EngineEvent::Buffered { uri, ranges, total } => {
+            assert_eq!(uri, &g.uri);
+            assert_eq!(*total, len);
+            if ranges.len() == 2 && hole.is_none() {
+                hole = Some(ranges.clone());
+                g.tail.open();
+                g.fill.open();
+            }
+            fills.push(ranges.clone());
+        }
+        _ => {}
+    }));
+    assert_eq!(waits.first(), Some(&true), "{waits:?}");
+    assert_eq!(waits.last(), Some(&false), "{waits:?}");
+    let hole = hole.expect("no hole reported");
+    assert_eq!(hole[0].0, 0, "{hole:?}");
+    assert!(hole[0].1 < seek_at, "{hole:?}");
+    assert!(hole[1].0 <= seek_at && hole[1].0 > hole[0].1, "{hole:?}");
+    // What is received only grows.
+    let covered = |r: &Vec<(u64, u64)>| r.iter().map(|(a, b)| b - a).sum::<u64>();
+    assert!(
+        fills.windows(2).all(|w| covered(&w[0]) <= covered(&w[1])),
+        "{fills:?}"
+    );
+    let got = std::fs::read(&out).unwrap();
+    assert!(
+        got == pcm[pcm.len() - got.len()..],
+        "output is not the tail"
     );
 }
 

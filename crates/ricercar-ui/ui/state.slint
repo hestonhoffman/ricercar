@@ -207,6 +207,12 @@ export struct DetailShelf {
     tracks: [TrackRow],
 }
 
+// Part of a stream received so far, as fractions of its length.
+export struct BufferedPart {
+    start: float,
+    end: float,
+}
+
 export struct ChainHop {
     label: string,
     value: string,
@@ -663,8 +669,11 @@ export global App {
     // plugins still searching ("Jellyfin, Demo"), and their errors
     in property <string> search-pending;
     in property <string> search-errors;
-    // a plugin track's URL is being fetched (shown after 300 ms)
-    in property <bool> resolving;
+    // waiting for the track: its URL (plugin tracks) or the stream's data,
+    // until it plays (shown after 300 ms)
+    in property <bool> loading;
+    // parts of the playing HTTP stream received so far (empty otherwise)
+    in property <[BufferedPart]> buffered;
 
     // ---------------------------------------------------------------- toasts
     in property <string> toast;

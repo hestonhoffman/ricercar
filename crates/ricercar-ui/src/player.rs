@@ -14,7 +14,10 @@ use slint::{ModelRc, VecModel};
 use crate::app::{LARGE, THUMB, Ui, post, with_ui};
 use crate::images::{Lookup, Source};
 use crate::text::{khz, long_duration, mmss, quality, t, tf};
-use crate::{ChainHop, LyricLine, Page, QueueRow};
+use crate::{BufferedPart, ChainHop, LyricLine, Page, QueueRow};
+
+/// A wait shorter than this shows no loading state.
+const LOADING_SHOWN_AFTER: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
 pub struct PlayerView {
@@ -34,6 +37,18 @@ pub struct PlayerView {
     /// now-playing refreshes of the same track do not notify again.
     notified: Option<(String, Option<String>)>,
     events: Option<std::sync::mpsc::Receiver<CtlEvent>>,
+    /// Since when the track is awaited (URL, then data), while it is.
+    loading_since: Option<Instant>,
+    buffered: Vec<(f32, f32)>,
+}
+
+/// Start of the current wait: kept while waiting, reset once it is over.
+fn wait_start(waiting: bool, since: Option<Instant>, now: Instant) -> Option<Instant> {
+    waiting.then(|| since.unwrap_or(now))
+}
+
+fn loading_shown(since: Option<Instant>, now: Instant) -> bool {
+    since.is_some_and(|t| now.duration_since(t) >= LOADING_SHOWN_AFTER)
 }
 
 fn cover_source(info: &TrackInfo) -> Option<(String, Source)> {
@@ -213,6 +228,29 @@ fn tick_inner(ui: &Rc<Ui>) {
     });
     app.set_can_next(st.has_next());
     app.set_queue_radio_pending(st.radio_pending);
+
+    // ---- loading: the plugin URL, then the stream's data (also after a
+    // seek or on underrun)
+    let now = Instant::now();
+    let (loading, buffered) = {
+        let mut pv = ui.player.borrow_mut();
+        let waiting = st.resolving.is_some() || st.buffering;
+        pv.loading_since = wait_start(waiting, pv.loading_since, now);
+        let buffered = (pv.buffered != st.buffered).then(|| {
+            pv.buffered = st.buffered.clone();
+            st.buffered
+                .iter()
+                .map(|&(start, end)| BufferedPart { start, end })
+                .collect::<Vec<_>>()
+        });
+        (loading_shown(pv.loading_since, now), buffered)
+    };
+    if app.get_loading() != loading {
+        app.set_loading(loading);
+    }
+    if let Some(parts) = buffered {
+        app.set_buffered(ModelRc::new(VecModel::from(parts)));
+    }
 
     let item = st.current_item().cloned();
     let now_id = item.as_ref().map(|q| q.id);
@@ -1112,4 +1150,28 @@ fn notify(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
             post(move |ui| ui.player.borrow_mut().notif_id = id);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loading_shows_after_a_lasting_wait_only() {
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let since = wait_start(true, None, t0);
+        assert_eq!(since, Some(t0));
+        assert!(!loading_shown(since, at(299)));
+        // Still waiting: the start is kept.
+        let since = wait_start(true, since, at(250));
+        assert_eq!(since, Some(t0));
+        assert!(loading_shown(since, at(300)));
+        // Over: hidden at once, and a new wait starts from zero.
+        let since = wait_start(false, since, at(400));
+        assert!(!loading_shown(since, at(400)));
+        let since = wait_start(true, since, at(500));
+        assert!(!loading_shown(since, at(700)));
+        assert!(loading_shown(since, at(800)));
+    }
 }

@@ -210,6 +210,10 @@ msgid "Previous"
 msgstr "前へ"
 
 msgctxt "PlayerBar"
+msgid "Loading…"
+msgstr "読み込み中…"
+
+msgctxt "PlayerBar"
 msgid "Pause"
 msgstr "一時停止"
 
@@ -232,10 +236,6 @@ msgstr "再生位置"
 msgctxt "PlayerBar"
 msgid "LIVE"
 msgstr "ライブ"
-
-msgctxt "PlayerBar"
-msgid "Loading…"
-msgstr "読み込み中…"
 
 msgctxt "PlayerBar"
 msgid "Lyrics"

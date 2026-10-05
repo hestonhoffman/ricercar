@@ -211,6 +211,10 @@ msgid "Previous"
 msgstr "Zurück"
 
 msgctxt "PlayerBar"
+msgid "Loading…"
+msgstr "Wird geladen…"
+
+msgctxt "PlayerBar"
 msgid "Pause"
 msgstr "Pause"
 
@@ -233,10 +237,6 @@ msgstr "Position"
 msgctxt "PlayerBar"
 msgid "LIVE"
 msgstr "LIVE"
-
-msgctxt "PlayerBar"
-msgid "Loading…"
-msgstr "Wird geladen…"
 
 msgctxt "PlayerBar"
 msgid "Lyrics"

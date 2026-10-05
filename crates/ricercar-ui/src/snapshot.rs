@@ -117,7 +117,8 @@ fn capture(dir: &std::path::Path, name: &str) {
 
 type Step = (u64, Box<dyn Fn(&Rc<Ui>)>);
 
-/// `RICERCAR_SNAPSHOT_TOUR`: the default screenshot tour, `perf` or `state`.
+/// `RICERCAR_SNAPSHOT_TOUR`: the default screenshot tour, `perf`, `state`,
+/// `plugins` or `stream`.
 pub fn tour() -> String {
     std::env::var("RICERCAR_SNAPSHOT_TOUR").unwrap_or_default()
 }
@@ -155,6 +156,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
         "perf" => return perf_tour(dir),
         "state" => return state_tour(),
         "plugins" => return plugins_tour(dir),
+        "stream" => return stream_tour(dir),
         _ => {}
     }
     let _ = ui;
@@ -545,6 +547,76 @@ fn with_ui_ret<T>(f: impl FnOnce(&Rc<Ui>) -> T) -> Option<T> {
     let mut out = None;
     with_ui(|ui| out = Some(f(ui)));
     out
+}
+
+// ------------------------------------------------------------------ stream tour
+
+/// `RICERCAR_SNAPSHOT_TOUR=stream` with `RICERCAR_SNAPSHOT_URL=<http URL>`:
+/// plays a (slow) HTTP stream and captures the player bar while it loads,
+/// plays, after a seek far ahead, and after a seek back into the part not
+/// received yet.
+fn stream_tour(dir: std::path::PathBuf) {
+    let url = std::env::var("RICERCAR_SNAPSHOT_URL").unwrap_or_default();
+    let steps: Vec<(&str, Step)> = vec![
+        (
+            "",
+            (
+                300,
+                Box::new(move |ui| {
+                    let info = ricercar_core::TrackInfo {
+                        uri: url.clone(),
+                        title: "Slow stream".into(),
+                        artist: Some("Local relay".into()),
+                        ..Default::default()
+                    };
+                    ui.ctx
+                        .ctl
+                        .play_tracks(vec![info], 0, ricercar_core::PlayContext::None);
+                }),
+            ),
+        ),
+        ("stream-loading", (1200, Box::new(|_| {}))),
+        ("stream-playing", (4500, Box::new(|_| {}))),
+        (
+            "",
+            (
+                100,
+                Box::new(|ui| {
+                    let dur = ui.ctx.ctl.lock().dur_ms;
+                    ui.ctx.ctl.seek_ms(dur * 3 / 4);
+                }),
+            ),
+        ),
+        ("stream-seeking", (1200, Box::new(|_| {}))),
+        ("stream-after-seek", (4500, Box::new(|_| {}))),
+        (
+            "",
+            (
+                100,
+                Box::new(|ui| {
+                    let dur = ui.ctx.ctl.lock().dur_ms;
+                    ui.ctx.ctl.seek_ms(dur * 2 / 5);
+                }),
+            ),
+        ),
+        ("stream-back-into-hole", (1200, Box::new(|_| {}))),
+    ];
+    let dir = Rc::new(dir);
+    let mut delay = 0;
+    let n = steps.len();
+    for (i, (name, (wait, f))) in steps.into_iter().enumerate() {
+        delay += wait;
+        let dir = dir.clone();
+        slint::Timer::single_shot(Duration::from_millis(delay), move || {
+            with_ui(|ui| f(ui));
+            if !name.is_empty() {
+                capture(&dir, name);
+            }
+            if i + 1 == n {
+                let _ = slint::quit_event_loop();
+            }
+        });
+    }
 }
 
 // ------------------------------------------------------------------ perf tour

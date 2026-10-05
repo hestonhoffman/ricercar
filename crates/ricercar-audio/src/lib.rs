@@ -6,6 +6,7 @@
 //! track at its native rate/depth, it is refused, not degraded. DSD files
 //! (`dsd`) go out as DoP, native DSD or, when asked, converted PCM.
 
+mod buffering;
 mod client;
 pub mod device;
 pub mod dsd;

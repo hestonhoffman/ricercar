@@ -233,6 +233,8 @@ pub enum CtlEvent {
     /// A play was long enough to count (history, scrobblers).
     Played(Box<TrackInfo>),
     StreamTitle(String),
+    /// `buffering` or `buffered` changed.
+    Buffering,
     Error(String),
 }
 
@@ -263,6 +265,12 @@ pub struct CtlState {
     /// How the playing plugin item's stream reaches the engine (from
     /// `track.resolve`); `None` for anything else.
     pub delivery: Option<Delivery>,
+    /// Waiting for a network stream: handed to the engine and not playing
+    /// yet, or the engine reported a wait (after a seek, on underrun).
+    pub buffering: bool,
+    /// Parts of the playing HTTP stream received so far, as fractions of
+    /// its length (sorted, `start < end`); empty for anything else.
+    pub buffered: Vec<(f32, f32)>,
     /// Continuous playback is asking the plugin for more tracks.
     pub radio_pending: bool,
     /// Queue id of the last item the engine played to its very end.
@@ -465,6 +473,8 @@ impl Controller {
                 queue_rev: 0,
                 resolving: None,
                 delivery: None,
+                buffering: false,
+                buffered: Vec::new(),
                 radio_pending: false,
                 last_finished: None,
             })),
@@ -581,6 +591,12 @@ impl Controller {
                                 uri,
                                 reason: ricercar_audio::EndReason::Finished,
                             }) => bridge.on_track_finished(&uri),
+                            Some(EngineEvent::Buffering { waiting, .. }) => {
+                                bridge.set_buffering(Some(waiting), None)
+                            }
+                            Some(EngineEvent::Buffered { uri, ranges, total }) => {
+                                bridge.on_buffered(&uri, &ranges, total)
+                            }
                             Some(EngineEvent::TrackEnded { .. }) | None => {}
                         }
                         let save_due = last_save.elapsed() >= Duration::from_secs(10);
@@ -1459,6 +1475,23 @@ struct Bridge {
     continuous: Arc<AtomicBool>,
 }
 
+fn is_network(uri: &str) -> bool {
+    uri.starts_with("http://") || uri.starts_with("https://")
+}
+
+/// Byte ranges of a body of `total` bytes as fractions of it.
+fn fractions(ranges: &[(u64, u64)], total: u64) -> Vec<(f32, f32)> {
+    if total == 0 {
+        return Vec::new();
+    }
+    let f = |b: u64| (b.min(total) as f64 / total as f64) as f32;
+    ranges
+        .iter()
+        .map(|&(a, b)| (f(a), f(b)))
+        .filter(|(a, b)| a < b)
+        .collect()
+}
+
 /// HTTP statuses after which a resolved URL is resolved once more.
 const RERESOLVE_ON: [u16; 4] = [401, 403, 404, 410];
 
@@ -1531,6 +1564,8 @@ impl Bridge {
             st.stream_title = None;
             st.resolving = None;
             st.delivery = None;
+            st.buffering = false;
+            st.buffered.clear();
             st.dur_ms = st.current_item().map(|q| q.info.duration_ms).unwrap_or(0);
             st.current_item().cloned()
         };
@@ -1556,6 +1591,7 @@ impl Bridge {
             p.loading = Some(item.id);
             self.opts_for(&item.info, p.replaygain)
         };
+        self.lock_state().buffering = is_network(&item.info.uri);
         self.player().load_with(&item.info.uri, opts);
         self.events.publish(CtlEvent::TrackChanged);
     }
@@ -1588,7 +1624,11 @@ impl Bridge {
                     p.resolved.insert(item.id, res.clone());
                     self.opts_for(&info, p.replaygain)
                 };
-                self.lock_state().delivery = Some(res.delivery);
+                {
+                    let mut st = self.lock_state();
+                    st.delivery = Some(res.delivery);
+                    st.buffering = is_network(&res.url);
+                }
                 self.player().load_with(&res.url, opts);
                 self.events.publish(CtlEvent::TrackChanged);
             }
@@ -1863,6 +1903,9 @@ impl Bridge {
             st.pos_ms = 0;
             st.stream_title = None;
             st.resolving = None;
+            // Opened: the first samples are decoded.
+            st.buffering = false;
+            st.buffered.clear();
             st.dur_ms = st.current_item().map(|q| q.info.duration_ms).unwrap_or(0);
             st.current_item().map(|q| q.id)
         };
@@ -1896,6 +1939,9 @@ impl Bridge {
             if status == TransportStatus::Stopped {
                 st.pos_ms = 0;
             }
+        }
+        if status == TransportStatus::Stopped {
+            self.set_buffering(Some(false), Some(Vec::new()));
         }
         if status == TransportStatus::Stopped {
             self.lock_pending().armed = None;
@@ -1954,6 +2000,44 @@ impl Bridge {
             std::thread::spawn(move || b.rearm());
         }
         true
+    }
+
+    /// Update the loading state and the received parts; publish a change.
+    fn set_buffering(&self, waiting: Option<bool>, parts: Option<Vec<(f32, f32)>>) {
+        let changed = {
+            let mut st = self.lock_state();
+            let mut changed = false;
+            if let Some(w) = waiting.filter(|w| *w != st.buffering) {
+                st.buffering = w;
+                changed = true;
+            }
+            if let Some(p) = parts.filter(|p| *p != st.buffered) {
+                st.buffered = p;
+                changed = true;
+            }
+            changed
+        };
+        if changed {
+            self.events.publish(CtlEvent::Buffering);
+        }
+    }
+
+    /// Downloaded ranges of the stream now playing.
+    fn on_buffered(&self, uri: &str, ranges: &[(u64, u64)], total: u64) {
+        let playing = {
+            let st = self.lock_state();
+            st.current_item().map(|q| (q.id, q.info.uri == uri))
+        };
+        let Some((id, same)) = playing else { return };
+        let ours = same
+            || self
+                .lock_pending()
+                .resolved
+                .get(&id)
+                .is_some_and(|r| r.url == uri);
+        if ours {
+            self.set_buffering(None, Some(fractions(ranges, total)));
+        }
     }
 
     fn on_error(&self, message: String, uri: Option<String>, http_status: Option<u16>) {
@@ -2039,6 +2123,52 @@ mod tests {
             .iter()
             .map(|q| q.info.title.clone())
             .collect()
+    }
+
+    #[test]
+    fn received_ranges_map_to_fractions() {
+        assert_eq!(
+            fractions(&[(0, 25), (50, 100), (100, 120)], 100),
+            [(0.0, 0.25), (0.5, 1.0)]
+        );
+        assert!(fractions(&[(0, 10)], 0).is_empty());
+    }
+
+    #[test]
+    fn buffering_state_follows_the_engine_and_resets() {
+        let c = stalled();
+        let uri = "http://127.0.0.1:9/a.flac";
+        c.enqueue(
+            vec![TrackInfo {
+                uri: uri.into(),
+                title: "a".into(),
+                ..Default::default()
+            }],
+            EnqueueAt::End,
+        );
+        c.lock().current = Some(0);
+        let events = c.subscribe();
+        let b = c.bridge();
+        b.on_buffered(uri, &[(0, 250), (500, 1000)], 1000);
+        assert_eq!(c.lock().buffered, [(0.0, 0.25), (0.5, 1.0)]);
+        assert!(events.try_iter().any(|e| e == CtlEvent::Buffering));
+        // Another stream's progress is not ours.
+        b.on_buffered("http://127.0.0.1:9/b.flac", &[(0, 1000)], 1000);
+        assert_eq!(c.lock().buffered, [(0.0, 0.25), (0.5, 1.0)]);
+        assert!(events.try_iter().next().is_none());
+        b.set_buffering(Some(true), None);
+        assert!(c.lock().buffering);
+        b.set_buffering(Some(false), None);
+        assert!(!c.lock().buffering);
+        b.set_buffering(Some(true), None);
+        c.lock().status = TransportStatus::Playing;
+        b.on_status(TransportStatus::Stopped);
+        let st = c.lock().clone();
+        assert!(!st.buffering && st.buffered.is_empty());
+        b.on_buffered(uri, &[(0, 500)], 1000);
+        b.on_track_started(uri, None);
+        let st = c.lock().clone();
+        assert!(!st.buffering && st.buffered.is_empty());
     }
 
     #[test]

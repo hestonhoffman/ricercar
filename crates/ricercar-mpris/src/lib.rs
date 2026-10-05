@@ -381,7 +381,7 @@ pub fn spawn_event_loop(
                             p.can_go_previous_changed(em).await?;
                             p.can_play_changed(em).await
                         }
-                        CtlEvent::Played(_) | CtlEvent::Error(_) => Ok(()),
+                        CtlEvent::Played(_) | CtlEvent::Error(_) | CtlEvent::Buffering => Ok(()),
                     }
                 });
                 if let Err(e) = r {
