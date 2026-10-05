@@ -7,6 +7,7 @@
 
 mod client;
 pub mod device;
+pub mod dsd;
 pub mod error;
 pub mod fmt;
 pub mod gain;
