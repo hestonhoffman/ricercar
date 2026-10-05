@@ -377,6 +377,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     ctl.set_resolver(Arc::new(plugins.clone()));
     ctl.set_continuous(cfg.audio.continuous_playback);
     ctl.set_fixed_volume(cfg.audio.fixed_volume);
+    ctl.set_dsd_modes(dsd_modes(&cfg));
     plugins.attach(&ctl);
     plugins.set_output(output_info(&cfg.audio.device, None));
     plugins.set_language(&cfg.ui.language);
@@ -588,6 +589,15 @@ fn rescan_in_background(
         .expect("spawn scan");
 }
 
+/// `[audio.dsd]` as engine modes.
+fn dsd_modes(cfg: &Config) -> std::collections::BTreeMap<String, ricercar_audio::dsd::DsdMode> {
+    cfg.audio
+        .dsd
+        .iter()
+        .map(|(device, out)| (device.clone(), out.mode()))
+        .collect()
+}
+
 impl AppContext {
     /// Persist the config and apply library changes (roots/watch).
     pub fn update_config(&self, f: impl FnOnce(&mut Config)) {
@@ -606,6 +616,7 @@ impl AppContext {
         }
         self.ctl.set_continuous(cfg.audio.continuous_playback);
         self.ctl.set_fixed_volume(cfg.audio.fixed_volume);
+        self.ctl.set_dsd_modes(dsd_modes(&cfg));
         self.plugins.set_language(&cfg.ui.language);
         if old_plugins != cfg.plugins {
             self.apply_plugins();

@@ -1,7 +1,7 @@
 //! Playback controller: owns the queue, drives the audio engine, mirrors its
 //! state for every front-end (UI, MPRIS, UPnP) and publishes change events.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
 use ricercar_audio::TrackOpts;
+use ricercar_audio::dsd::DsdMode;
 use ricercar_audio::player::{ChainInfo, EngineEvent, PlayerHandle, TransportStatus};
 use serde::{Deserialize, Serialize};
 
@@ -407,6 +408,8 @@ pub struct Controller {
     continuous: Arc<AtomicBool>,
     /// Serialises volume and mute changes against the fixed-volume lock.
     volume_gate: Mutex<()>,
+    /// DSD output mode per device name (`[audio.dsd]`); PCM if absent.
+    dsd_modes: RwLock<BTreeMap<String, DsdMode>>,
 }
 
 fn chain_stub(device: &str) -> ChainInfo {
@@ -417,6 +420,7 @@ fn chain_stub(device: &str) -> ChainInfo {
         container: None,
         volume: 100,
         bit_perfect: true,
+        dsd: None,
     }
 }
 
@@ -476,6 +480,7 @@ impl Controller {
             resolver: Arc::new(RwLock::new(None)),
             continuous: Arc::new(AtomicBool::new(false)),
             volume_gate: Mutex::new(()),
+            dsd_modes: RwLock::new(BTreeMap::new()),
         };
         ctl.spawn_bridge();
         ctl
@@ -690,6 +695,7 @@ impl Controller {
         handle.set_volume(vol);
         handle.set_mute(muted);
         handle.set_gain(*self.rg_preamp.lock().unwrap());
+        handle.set_dsd_mode(self.dsd_mode_for(name));
         *self.player() = handle;
         *self.device_name.write().unwrap() = name.into();
         {
@@ -699,10 +705,55 @@ impl Controller {
         }
         *self.pending.lock().unwrap() = Pending::default();
         if resume {
-            let id = self.lock().current_item().map(|q| q.id);
-            if let Some(id) = id {
-                self.pending.lock().unwrap().seek_on_start = Some((id, pos));
-                self.bridge().load_current();
+            self.reload_at(pos);
+        }
+    }
+
+    /// Load the current item again and seek to `pos`.
+    fn reload_at(&self, pos: u64) {
+        let id = self.lock().current_item().map(|q| q.id);
+        if let Some(id) = id {
+            self.pending.lock().unwrap().seek_on_start = Some((id, pos));
+            self.bridge().load_current();
+        }
+    }
+
+    /// DSD output mode chosen for `device` (PCM unless set).
+    pub fn dsd_mode_for(&self, device: &str) -> DsdMode {
+        self.dsd_modes
+            .read()
+            .unwrap()
+            .get(device)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// DSD output modes per device (`[audio.dsd]`). A DSD track playing on
+    /// the current device restarts where it was in the new mode.
+    pub fn set_dsd_modes(&self, modes: BTreeMap<String, DsdMode>) {
+        let device = self.device_name();
+        let before = self.dsd_mode_for(&device);
+        *self.dsd_modes.write().unwrap() = modes;
+        let now = self.dsd_mode_for(&device);
+        if now == before {
+            return;
+        }
+        self.player().set_dsd_mode(now);
+        let (playing_dsd, paused, pos) = {
+            let st = self.lock();
+            (
+                st.status != TransportStatus::Stopped
+                    && st
+                        .current_uri()
+                        .is_some_and(|u| ricercar_audio::dsd::is_dsd_uri(&u)),
+                st.status == TransportStatus::Paused,
+                st.pos_ms,
+            )
+        };
+        if playing_dsd {
+            self.reload_at(pos);
+            if paused {
+                self.player().pause();
             }
         }
     }

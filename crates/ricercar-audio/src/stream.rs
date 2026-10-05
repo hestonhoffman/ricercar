@@ -9,15 +9,16 @@ use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptio
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::{TimeBase, Timestamp};
 
+use crate::dsd::play::DsdPlayback;
+use crate::dsd::{DsdFormat, DsdMode};
 use crate::error::{AudioError, Result};
-use crate::fmt::PcmFormat;
+use crate::fmt::{PcmFormat, Wire};
 use crate::http;
 use crate::redact::redact_url;
 
 /// A decoded track ready (or nearly ready) to be pumped into a sink.
 pub struct TrackSource {
-    reader: Box<dyn FormatReader>,
-    decoder: Box<dyn AudioDecoder>,
+    dec: Decoding,
     track_id: u32,
     pub uri: String,
     pub duration_ms: Option<u64>,
@@ -41,6 +42,17 @@ pub struct TrackSource {
     overflow: VecDeque<i32>,
     /// Local file being decoded.
     path: Option<String>,
+}
+
+/// What produces the samples.
+enum Decoding {
+    /// Symphonia demuxer and decoder (PCM codecs).
+    Sym {
+        reader: Box<dyn FormatReader>,
+        decoder: Box<dyn AudioDecoder>,
+    },
+    /// DSF / DFF, in the output's DSD mode.
+    Dsd(Box<DsdPlayback>),
 }
 
 /// Part of a file played as a track, in frames.
@@ -197,9 +209,25 @@ fn extension_of(uri: &str) -> Option<String> {
 }
 
 impl TrackSource {
+    /// Open a track; DSD files are converted to PCM.
     pub fn open(uri: &str) -> Result<TrackSource> {
+        TrackSource::open_with(uri, DsdMode::Pcm)
+    }
+
+    /// Open a track; DSD files and SACD tracks go out in `dsd` mode.
+    pub fn open_with(uri: &str, dsd: DsdMode) -> Result<TrackSource> {
+        if let Some((image, n)) = crate::dsd::sacd::split_key(uri)
+            && let Some(path) = path_from_uri(image)
+        {
+            return TrackSource::open_sacd(uri, &path, n, dsd);
+        }
         let (file_uri, clip) = split_clip(uri);
         let local = path_from_uri(file_uri);
+        if let Some(path) = local.as_deref()
+            && crate::dsd::is_dsd_path(path)
+        {
+            return TrackSource::open_dsd(uri, path, clip, dsd);
+        }
         let (src, seekable, titles): (Box<dyn MediaSource>, bool, _) =
             if let Some(path) = local.clone() {
                 let file = std::fs::File::open(&path)
@@ -271,8 +299,7 @@ impl TrackSource {
         }
 
         let mut src = TrackSource {
-            reader,
-            decoder,
+            dec: Decoding::Sym { reader, decoder },
             track_id,
             uri: uri.into(),
             duration_ms,
@@ -293,6 +320,105 @@ impl TrackSource {
             src.seek_frame(sp.start)?;
         }
         Ok(src)
+    }
+
+    fn open_dsd(uri: &str, path: &str, clip: Option<Clip>, mode: DsdMode) -> Result<TrackSource> {
+        let src = crate::dsd::open_path(std::path::Path::new(path)).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AudioError::UnsupportedSource(format!("open {path}: {e}"))
+            } else {
+                AudioError::Decode(e.to_string())
+            }
+        })?;
+        let play = DsdPlayback::new(src, mode, clip.map(|c| (c.start, c.end)))
+            .map_err(|e| AudioError::Decode(e.to_string()))?;
+        Ok(TrackSource::dsd_source(uri, path, play))
+    }
+
+    /// Track `n` of the stereo area of a SACD image (`…/disc.iso#sacd=n`):
+    /// only the TOC is read here, the audio streams as it plays.
+    fn open_sacd(uri: &str, path: &str, n: u32, mode: DsdMode) -> Result<TrackSource> {
+        let img = crate::dsd::sacd::SacdImage::open(path).map_err(|e| match e {
+            AudioError::Io(e) => AudioError::UnsupportedSource(format!("open {path}: {e}")),
+            e => e,
+        })?;
+        let src = img.track_source(n)?;
+        let play =
+            DsdPlayback::new(src, mode, None).map_err(|e| AudioError::Decode(e.to_string()))?;
+        Ok(TrackSource::dsd_source(uri, path, play))
+    }
+
+    fn dsd_source(uri: &str, path: &str, play: DsdPlayback) -> TrackSource {
+        TrackSource {
+            duration_ms: play.duration_ms(),
+            format: Some(play.pcm_format()),
+            dec: Decoding::Dsd(Box::new(play)),
+            track_id: 0,
+            uri: uri.into(),
+            pending: VecDeque::new(),
+            end_of_stream: false,
+            scratch: Vec::new(),
+            seekable: true,
+            time_base: None,
+            titles: None,
+            rate: None,
+            span: None,
+            skip_to: 0,
+            overflow: VecDeque::new(),
+            path: Some(path.to_string()),
+        }
+    }
+
+    /// How the samples go out to the device.
+    pub fn wire(&self) -> Wire {
+        match &self.dec {
+            Decoding::Dsd(d) => d.wire(),
+            Decoding::Sym { .. } => Wire::Pcm,
+        }
+    }
+
+    /// A DSD track: its source format and the mode it is played in.
+    pub fn dsd(&self) -> Option<(DsdFormat, DsdMode)> {
+        match &self.dec {
+            Decoding::Dsd(d) => Some((d.source_format(), d.mode())),
+            Decoding::Sym { .. } => None,
+        }
+    }
+
+    /// DSD converted to PCM that the DAC refused: convert to the next lower
+    /// rate, from the start. False when there is none.
+    pub fn lower_dsd_rate(&mut self) -> bool {
+        let Decoding::Dsd(d) = &mut self.dec else {
+            return false;
+        };
+        if !d.lower_rate() {
+            return false;
+        }
+        self.format = Some(d.pcm_format());
+        self.pending.clear();
+        self.end_of_stream = false;
+        true
+    }
+
+    /// The DSD-to-PCM converter of a finished track, for the next one.
+    pub fn take_dsd_converter(&mut self) -> Option<crate::dsd::pcm::Decimator> {
+        match &mut self.dec {
+            Decoding::Dsd(d) => d.take_converter(),
+            Decoding::Sym { .. } => None,
+        }
+    }
+
+    pub fn adopt_dsd_converter(&mut self, prev: Option<crate::dsd::pcm::Decimator>) {
+        if let Decoding::Dsd(d) = &mut self.dec {
+            d.adopt_converter(prev);
+        }
+    }
+
+    fn reader(&self) -> Option<&dyn FormatReader> {
+        match &self.dec {
+            Decoding::Sym { reader, .. } => Some(reader.as_ref()),
+            Decoding::Dsd(_) => None,
+        }
     }
 
     /// Whether `uri` is the part of the same file that directly follows
@@ -352,7 +478,7 @@ impl TrackSource {
             Some(e) => e,
             None => {
                 let track = self
-                    .reader
+                    .reader()?
                     .tracks()
                     .iter()
                     .find(|t| t.id == self.track_id)?;
@@ -371,9 +497,18 @@ impl TrackSource {
         Some(end.saturating_sub(span.start))
     }
 
+    /// Exact length in frames of `format`, when known up front: a span of
+    /// a file, or a DSD track.
+    pub fn frames(&self) -> Option<u64> {
+        match &self.dec {
+            Decoding::Dsd(d) => d.out_frames(),
+            Decoding::Sym { .. } => self.span_frames(),
+        }
+    }
+
     fn file_duration_ms(&self) -> Option<u64> {
         let track = self
-            .reader
+            .reader()?
             .tracks()
             .iter()
             .find(|t| t.id == self.track_id)?;
@@ -409,10 +544,13 @@ impl TrackSource {
                 track_id: Some(self.track_id),
             },
         };
-        self.reader
+        let Decoding::Sym { reader, decoder } = &mut self.dec else {
+            return Err(AudioError::Decode("seek: not a PCM decoder".into()));
+        };
+        reader
             .seek(SeekMode::Accurate, to)
             .map_err(|e| AudioError::Decode(format!("seek: {e}")))?;
-        self.decoder.reset();
+        decoder.reset();
         self.pending.clear();
         self.overflow.clear();
         self.end_of_stream = false;
@@ -445,14 +583,25 @@ impl TrackSource {
         if !self.pending.is_empty() {
             return Ok(true);
         }
+        if let Decoding::Dsd(d) = &mut self.dec {
+            if self.end_of_stream {
+                return Ok(false);
+            }
+            let more = d.pump(&mut self.pending)?;
+            self.end_of_stream = !more;
+            return Ok(more || !self.pending.is_empty());
+        }
         loop {
             if self.end_of_stream {
                 return Ok(false);
             }
-            match self.reader.next_packet() {
+            let Decoding::Sym { reader, decoder } = &mut self.dec else {
+                return Ok(false);
+            };
+            match reader.next_packet() {
                 Ok(None) => {
                     self.end_of_stream = true;
-                    let _ = self.decoder.finalize();
+                    let _ = decoder.finalize();
                     return Ok(false);
                 }
                 Ok(Some(packet)) => {
@@ -460,7 +609,10 @@ impl TrackSource {
                         continue;
                     }
                     let first = self.frame_of(packet.pts);
-                    match self.decoder.decode(&packet) {
+                    let Decoding::Sym { decoder, .. } = &mut self.dec else {
+                        return Ok(false);
+                    };
+                    match decoder.decode(&packet) {
                         Ok(buf) => {
                             let spec = buf.spec();
                             let rate = spec.rate();
@@ -468,8 +620,7 @@ impl TrackSource {
                             let native = native_bits(&buf);
                             self.scratch.clear();
                             buf.copy_to_vec_interleaved::<i32>(&mut self.scratch);
-                            let bits = self
-                                .decoder
+                            let bits = decoder
                                 .codec_params()
                                 .bits_per_sample
                                 .map(|b| b as u8)
@@ -515,7 +666,7 @@ impl TrackSource {
                     }
                 }
                 Err(symphonia::core::errors::Error::ResetRequired) => {
-                    self.decoder.reset();
+                    decoder.reset();
                     continue;
                 }
                 // A truncated final frame surfaces as an unexpected EOF, not
@@ -524,7 +675,7 @@ impl TrackSource {
                     if e.kind() == std::io::ErrorKind::UnexpectedEof =>
                 {
                     self.end_of_stream = true;
-                    let _ = self.decoder.finalize();
+                    let _ = decoder.finalize();
                     return Ok(!self.pending.is_empty());
                 }
                 // Anything else is the transport failing (network, disk):
@@ -547,6 +698,12 @@ impl TrackSource {
     /// the demuxer lands on a packet boundary at or before the request, and
     /// that is where playback resumes.
     pub fn seek_ms(&mut self, ms: u64) -> Result<std::time::Duration> {
+        if let Decoding::Dsd(d) = &mut self.dec {
+            let at = d.seek_ms(ms)?;
+            self.pending.clear();
+            self.end_of_stream = false;
+            return Ok(at);
+        }
         if let (Some(span), Some(rate)) = (self.span, self.rate) {
             // Inside a span: relative to its start, and to the frame.
             let mut frame = span.start + ms * rate as u64 / 1000;
@@ -559,8 +716,10 @@ impl TrackSource {
         }
         let time = symphonia::core::units::Time::try_from_secs_f64(ms as f64 / 1000.0)
             .ok_or_else(|| AudioError::Decode("seek out of range".into()))?;
-        let seeked = self
-            .reader
+        let Decoding::Sym { reader, decoder } = &mut self.dec else {
+            return Err(AudioError::Decode("seek: not a PCM decoder".into()));
+        };
+        let seeked = reader
             .seek(
                 SeekMode::Accurate,
                 SeekTo::Time {
@@ -569,7 +728,7 @@ impl TrackSource {
                 },
             )
             .map_err(|e| AudioError::Decode(format!("seek: {e}")))?;
-        self.decoder.reset();
+        decoder.reset();
         self.pending.clear();
         self.end_of_stream = false;
         let actual = self

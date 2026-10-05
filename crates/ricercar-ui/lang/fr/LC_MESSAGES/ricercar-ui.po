@@ -310,6 +310,30 @@ msgctxt "DeviceCaps"
 msgid "Channels"
 msgstr "Canaux"
 
+msgctxt "DeviceCaps"
+msgid "DSD"
+msgstr "DSD"
+
+msgctxt "DeviceCaps"
+msgid "DSD output"
+msgstr "Sortie DSD"
+
+msgctxt "DeviceCaps"
+msgid "Convert to PCM"
+msgstr "Convertir en PCM"
+
+msgctxt "DeviceCaps"
+msgid "DoP"
+msgstr "DoP"
+
+msgctxt "DeviceCaps"
+msgid "Native"
+msgstr "Natif"
+
+msgctxt "DeviceCaps"
+msgid "Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise."
+msgstr "« Convertir en PCM » lit les fichiers DSD partout, sans être bit-perfect. DoP et natif envoient les bits DSD intacts, à volume fixe. Ne choisissez DoP que si votre DAC le prend en charge : un DAC sans DSD le joue comme un bruit fort."
+
 msgctxt "StationLine"
 msgid "Favorite"
 msgstr "Favori"

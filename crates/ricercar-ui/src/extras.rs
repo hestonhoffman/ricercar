@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use ricercar_core::config::{ReplayGain, Theme as ThemeCfg};
+use ricercar_core::config::{DsdOutput, ReplayGain, Theme as ThemeCfg};
 use ricercar_core::writer::Durability;
 use ricercar_core::{PlayContext, TrackInfo};
 use ricercar_online::radio::{RadioBrowser, Station, StationQuery};
@@ -541,6 +541,7 @@ fn rate_histogram(ui: &Ui) -> Vec<ricercar_core::RateCount> {
 pub fn refresh_devices(ui: &Ui) {
     let current = ui.ctx.ctl.device_name();
     let cache = ui.saved_state.borrow().dac_caps.clone();
+    let dsd = ui.ctx.config.read().unwrap().audio.dsd.clone();
     let hist = rate_histogram(ui);
     let devices = ricercar_audio::device::list_devices();
     // Keep the names of PipeWire outputs for when they are not connected.
@@ -601,6 +602,19 @@ pub fn refresh_devices(ui: &Ui) {
                     .into(),
                 caps_status: status.into(),
                 lib_note: lib_note.into(),
+                dsd_choice: match dsd.get(&d.name).filter(|_| hardware) {
+                    Some(DsdOutput::Dop) => 1,
+                    Some(DsdOutput::Native) => 2,
+                    _ => 0,
+                },
+                // Native only when the last probe saw DSD formats.
+                dsd_native: caps.is_some_and(|c| !c.dsd.is_empty())
+                    || dsd.get(&d.name) == Some(&DsdOutput::Native),
+                dsd_badge: match dsd.get(&d.name).filter(|_| hardware) {
+                    Some(DsdOutput::Dop) => t("DSD: DoP").into(),
+                    Some(DsdOutput::Native) => t("DSD: NATIVE").into(),
+                    _ => "".into(),
+                },
                 name: d.name.into(),
             }
         })
@@ -927,6 +941,27 @@ pub fn wire(ui: &Rc<Ui>) {
     });
     app.on_copy_report(|| with_ui(|ui| crate::diag::copy_report(ui)));
     app.on_open_logs(crate::diag::open_logs);
+    app.on_set_device_dsd(|name, choice| {
+        with_ui(|ui| {
+            let name = name.to_string();
+            // DoP and native are for hw: devices only.
+            let hardware =
+                ricercar_audio::device::classify(&name) == ricercar_audio::DeviceKind::Hardware;
+            let out = match choice {
+                1 if hardware => DsdOutput::Dop,
+                2 if hardware => DsdOutput::Native,
+                _ => DsdOutput::Pcm,
+            };
+            ui.ctx.update_config(|c| {
+                if out == DsdOutput::Pcm {
+                    c.audio.dsd.remove(&name);
+                } else {
+                    c.audio.dsd.insert(name.clone(), out);
+                }
+            });
+            refresh_devices(ui);
+        })
+    });
     app.on_toggle_device_caps(|name| {
         with_ui(|ui| {
             let name = name.to_string();

@@ -19,6 +19,19 @@ impl PcmFormat {
     }
 }
 
+/// How a track's samples go out to the device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Wire {
+    /// Linear PCM (DSD converted to PCM included).
+    #[default]
+    Pcm,
+    /// DSD over PCM: opened as 24-bit PCM, each sample carries DSD bits
+    /// under a marker. Must reach the DAC untouched.
+    Dop,
+    /// ALSA DSD sample formats: one 32-bit word of DSD per channel.
+    NativeDsd,
+}
+
 /// Wire container used on a sink for a given source format (ALSA semantics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Container {

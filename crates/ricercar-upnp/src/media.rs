@@ -54,6 +54,8 @@ pub fn mime_of(path: &str) -> &'static str {
         "wav" => "audio/wav",
         "aif" | "aiff" | "aifc" => "audio/aiff",
         "ogg" | "oga" | "opus" => "audio/ogg",
+        "dsf" => "audio/x-dsf",
+        "dff" => "audio/x-dff",
         _ => "application/octet-stream",
     }
 }
@@ -73,8 +75,8 @@ pub fn protocol_info(mime: &str) -> String {
     format!("http-get:*:{mime}:{}", dlna_features(mime))
 }
 
-/// A cue track is decoded and sent as WAV: converted content, no byte
-/// seeking.
+/// A cue or SACD track is decoded and sent as WAV: converted content, no
+/// byte seeking.
 const CUE_FEATURES: &str =
     "DLNA.ORG_OP=00;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01700000000000000000000000000000";
 
@@ -172,9 +174,11 @@ pub fn serve_media(r: &Renderer, req: &Request, stream: &mut TcpStream) {
     if !r.ctl.lib.has_path(&path_str) {
         return http::not_found(stream);
     }
-    if ricercar_core::cue::split_key(&path_str).is_some() {
+    if ricercar_core::cue::split_key(&path_str).is_some()
+        || ricercar_core::sacd::split_key(&path_str).is_some()
+    {
         return match r.ctl.lib.track(&path_str) {
-            Some(t) => serve_cue(&t.uri, head_only, stream),
+            Some(t) => serve_wav(&t.uri, head_only, stream),
             None => http::not_found(stream),
         };
     }
@@ -238,15 +242,16 @@ fn wav_header(rate: u32, channels: u16, bytes: u16, data_len: u32) -> Vec<u8> {
     h
 }
 
-/// A cue track (part of an audio file) as a WAV of exactly its samples.
-/// Range requests are not served: the length is known, positions in it
-/// would need decoding up to them.
-fn serve_cue(uri: &str, head_only: bool, stream: &mut TcpStream) {
+/// A cue track (part of an audio file) as a WAV of exactly its samples, a
+/// SACD track as a WAV of its conversion to PCM. Range requests are not
+/// served: the length is known, positions in it would need decoding up to
+/// them.
+fn serve_wav(uri: &str, head_only: bool, stream: &mut TcpStream) {
     let Ok(mut src) = ricercar_audio::TrackSource::open(uri) else {
         return http::not_found(stream);
     };
     let primed = src.pump().is_ok();
-    let (Some(fmt), Some(frames), true) = (src.format, src.span_frames(), primed) else {
+    let (Some(fmt), Some(frames), true) = (src.format, src.frames(), primed) else {
         return http::not_found(stream);
     };
     // Plain PCM WAV holds whole bytes per sample.

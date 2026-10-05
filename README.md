@@ -69,6 +69,10 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   albums of your library it cannot play natively
 - Gapless, sample-exact within a rate
 - FLAC · ALAC · WAV · AIFF · AAC · MP3 · Ogg Vorbis
+- DSD files (DSF, DFF, DST-compressed DFF; DSD64 and up, stereo): DoP or
+  native DSD to a `hw:` DAC, bit-perfect, or converted to 24-bit PCM
+- SACD images (ISO, stereo area, plain or DST): played straight from the
+  image the same three ways, gapless from track to track
 - Hardware pause, device hot-switch, clean stop on unplug
 - ReplayGain (track / album / auto) with peak protection (off by default)
 - HTTP streams seek at once with Range requests (sequential fallback);
@@ -85,6 +89,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Playlists with M3U / M3U8 import & export
 - CUE sheets: an album ripped as one file plays as its tracks, gapless and
   sample-exact
+- SACD images: an `.iso` shows as its album, one track per track of the
+  stereo area, with the disc's text (titles, artists, year, genre)
 - Covers: embedded, folder images, or Cover Art Archive
 - Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net
 
@@ -374,6 +380,42 @@ container.
 
 <br clear="right">
 
+### DSD
+
+DSF and DFF files (DSD64, DSD128, DSD256; stereo; DFF with DST compression
+too) play in one of three ways, chosen **per output** in Settings → Audio
+output (open a `hw:` device's capabilities):
+
+- **Convert to PCM** (the default, for every device): DSD is filtered and
+  decimated to 24-bit PCM at 88.2 kHz (44.1 kHz if the DAC refuses 88.2).
+  Flat to 20 kHz, 120 dB of alias rejection, and 6 dB of headroom: the
+  SACD reference level lands at −6 dBFS, so DSD's louder peaks do not
+  clip. This is a conversion: **not bit-perfect**, and the signal path
+  says so in amber.
+- **DoP** (DSD over PCM): 16 DSD bits per channel ride in each 24-bit PCM
+  frame under alternating 0x05 / 0xFA markers, at 176.4 kHz for DSD64. The
+  DAC recognises the markers and plays DSD, bit-perfect.
+- **Native**: the ALSA DSD formats (DSD_U32_BE, DSD_U16_LE…), offered only
+  when the last capability check of the device listed them.
+
+> [!WARNING]
+> Pick DoP only for a DAC that supports it. A DAC without DSD support plays
+> DoP as **loud noise**: keep the volume down the first time.
+
+DoP and native are only ever sent to a `hw:` device; PipeWire, `default`
+and plug devices always get converted PCM. While a DoP or native track
+plays, volume, mute, ReplayGain and the preamp are bypassed (unity gain,
+like fixed volume), since any change to the bits would turn them into
+noise; the signal path shows it. Gapless works between DSD tracks played
+the same way; switching between DSD and PCM reopens the device, as a
+rate change does.
+
+SACD images (`.iso` rips of a disc) are read in place: the library lists
+the tracks of the **stereo area** with the disc's text, and each one plays
+through the same DSD path, decoding DST on the fly when the disc uses it.
+The multichannel area is not played. Over UPnP, the MediaServer sends a
+SACD track as a 24-bit / 88.2 kHz WAV of its conversion.
+
 ## ⌨️ Keyboard
 
 | Keys | Action | | Keys | Action |
@@ -401,6 +443,9 @@ preamp_db = 0.0
 restore_session = true
 continuous_playback = false  # more tracks from a plugin radio when the queue ends
 fixed_volume = false  # keep the volume at 100 %, ignore volume changes
+
+[audio.dsd]                # how DSD files reach each device (default: pcm)
+"hw:1,0" = "dop"           # pcm | dop | native; dop/native for hw: only
 
 [library]
 roots = ["/home/me/Music", "/mnt/nas/flac"]
@@ -649,7 +694,8 @@ unit in `dist/`, and control it from your phone over UPnP / OpenHome.
 - [ ] Reports from real control points ([help wanted](docs/CONTROLS.md))
 - [ ] Optional parametric EQ / convolution (clearly marked non bit-perfect)
 - [x] CUE sheets
-- [ ] DSD over PCM (DoP)
+- [x] DSD (DSF/DFF): DoP, native DSD, conversion to PCM
+- [x] SACD images (stereo area)
 - [ ] Composer / work views for classical music
 - [x] AppImage
 - [ ] Flatpak

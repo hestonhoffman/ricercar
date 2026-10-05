@@ -175,6 +175,8 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
     let neon = album("Neon Rain");
     let fugues = album("Fugues & Ricercars");
     let one_take = album("Live in One Take");
+    let fifths = album("Pure Fifths");
+    let harbour = album("Harbour Lights");
     let steps: Vec<(&str, Step)> = vec![
         (
             "home",
@@ -336,8 +338,16 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                             channels_min: 2,
                             channels_max: 2,
                             probed_at: 0,
+                            dsd: vec!["DSD_U32_BE".into()],
                         };
                         crate::extras::store_caps(ui, &d.name, caps);
+                        // DSD sent as DoP to it: the choice and the badge.
+                        let name = d.name.clone();
+                        ui.ctx.update_config(|c| {
+                            c.audio
+                                .dsd
+                                .insert(name, ricercar_core::config::DsdOutput::Dop);
+                        });
                         ui.extras.borrow_mut().expanded.insert(d.name);
                     }
                     ui.navigate(Page::Settings, "", true);
@@ -384,6 +394,89 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                     let app = ui.app();
                     app.set_np_tab(2);
                     app.set_now_playing_open(true);
+                }),
+            ),
+        ),
+        (
+            // A SACD image: its stereo area's tracks, played from the image.
+            "sacd-album",
+            (
+                1500,
+                Box::new(move |ui| {
+                    let id = harbour();
+                    let tracks = ui.ctx.lib.album_tracks(&id);
+                    let ctl = ui.ctx.ctl.clone();
+                    ctl.play_library_tracks(
+                        &tracks,
+                        1,
+                        ricercar_core::PlayContext::Album(id.clone()),
+                    );
+                    ctl.pause();
+                    ui.app().set_now_playing_open(false);
+                    ui.navigate(Page::Album, &id, true);
+                    slint::Timer::single_shot(Duration::from_millis(300), move || {
+                        ctl.seek_ms(3_000);
+                    });
+                }),
+            ),
+        ),
+        (
+            "sacd-signal-path",
+            (
+                900,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_np_tab(2);
+                    app.set_now_playing_open(true);
+                }),
+            ),
+        ),
+        (
+            // A DSD64 album, converted to PCM on this output (the default).
+            "dsd-album",
+            (
+                1500,
+                Box::new(move |ui| {
+                    let id = fifths();
+                    let tracks = ui.ctx.lib.album_tracks(&id);
+                    let ctl = ui.ctx.ctl.clone();
+                    ctl.play_library_tracks(
+                        &tracks,
+                        0,
+                        ricercar_core::PlayContext::Album(id.clone()),
+                    );
+                    ctl.pause();
+                    ui.app().set_now_playing_open(false);
+                    ui.navigate(Page::Album, &id, true);
+                    slint::Timer::single_shot(Duration::from_millis(300), move || {
+                        ctl.seek_ms(4_000);
+                    });
+                }),
+            ),
+        ),
+        (
+            "dsd-signal-path",
+            (
+                900,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_np_tab(2);
+                    app.set_now_playing_open(true);
+                }),
+            ),
+        ),
+        (
+            // The same track as DoP (the null sink stands in for a DAC).
+            "dsd-dop-signal-path",
+            (
+                1500,
+                Box::new(|ui| {
+                    let device = ui.ctx.ctl.device_name();
+                    ui.ctx.ctl.set_dsd_modes(
+                        [(device, ricercar_audio::dsd::DsdMode::Dop)]
+                            .into_iter()
+                            .collect(),
+                    );
                 }),
             ),
         ),

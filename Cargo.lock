@@ -235,6 +235,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
+name = "anyhow"
+version = "1.0.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1103,6 +1109,15 @@ checksum = "ecc8e1361066d91f5ffccff060a3c3be9c3ecde15be2959c1937595f7a82a9f8"
 dependencies = [
  "libc",
  "linux-raw-sys 0.9.4",
+]
+
+[[package]]
+name = "dst-decoder"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d22ef63dfde0eac89eca20926f8bb64eec4bf12016647274a51d3bb11f6147c"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]
@@ -4058,11 +4073,13 @@ version = "0.8.0"
 dependencies = [
  "alsa",
  "crossbeam-channel",
+ "dst-decoder",
  "httparse",
  "libc",
  "rustls",
  "serde_json",
  "symphonia",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
  "url",

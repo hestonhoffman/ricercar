@@ -33,6 +33,9 @@ pub struct CachedCaps {
     pub channels_max: u32,
     /// Unix time of the probe.
     pub probed_at: i64,
+    /// ALSA DSD formats (`DSD_U32_BE`…); empty: no native DSD.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dsd: Vec<String>,
 }
 
 pub type CapsCache = BTreeMap<String, CachedCaps>;
@@ -45,11 +48,13 @@ impl CachedCaps {
             channels_min: *c.channels.start(),
             channels_max: *c.channels.end(),
             probed_at: now,
+            dsd: c.dsd.iter().map(|f| f.label().to_string()).collect(),
         }
     }
 
+    /// DSD files always play (converted to PCM at worst).
     pub fn supports_rate(&self, rate: u32) -> bool {
-        self.rates.contains(&rate)
+        self.rates.contains(&rate) || ricercar_audio::dsd::is_dsd_rate(rate)
     }
 
     pub fn supports(&self, c: Container) -> bool {
@@ -132,7 +137,20 @@ mod tests {
             channels_min: 2,
             channels_max: 2,
             probed_at: 0,
+            dsd: vec![],
         }
+    }
+
+    #[test]
+    fn dsd_rates_are_never_unsupported() {
+        let c = caps(&[44_100]);
+        assert!(c.supports_rate(2_822_400) && c.supports_rate(5_644_800));
+        let hist = [RateCount {
+            rate: 2_822_400,
+            albums: 2,
+            tracks: 9,
+        }];
+        assert!(unsupported(&hist, &c).is_empty());
     }
 
     #[test]
