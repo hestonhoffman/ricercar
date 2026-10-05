@@ -49,6 +49,18 @@ msgid "Install"
 msgstr "Installer"
 
 msgctxt "MainWindow"
+msgid "Add a plugin from a link"
+msgstr "Ajouter un plugin depuis un lien"
+
+msgctxt "MainWindow"
+msgid "Paste a link to a plugin program, to a GitHub repository (its latest release is used), or to a plugin index like the hub's. A path to a file on this computer works too. Nothing is installed or run before you confirm."
+msgstr "Collez le lien d'un programme de plugin, d'un dépôt GitHub (sa dernière release est utilisée) ou d'un index de plugins comme celui du hub. Le chemin d'un fichier sur cet ordinateur fonctionne aussi. Rien n'est installé ni lancé avant votre confirmation."
+
+msgctxt "MainWindow"
+msgid "Continue"
+msgstr "Continuer"
+
+msgctxt "MainWindow"
 msgid "Add a music folder"
 msgstr "Ajouter un dossier de musique"
 
@@ -1421,8 +1433,16 @@ msgid "Installed"
 msgstr "Installé"
 
 msgctxt "PluginsPage"
-msgid "No plugins yet. Install one from the catalogue below, or declare it in config.toml."
-msgstr "Aucun plugin pour l'instant. Installez-en un depuis le catalogue ci-dessous, ou déclarez-le dans config.toml."
+msgid "Add from a link"
+msgstr "Ajouter depuis un lien"
+
+msgctxt "PluginsPage"
+msgid "Add a file"
+msgstr "Ajouter un fichier"
+
+msgctxt "PluginsPage"
+msgid "No plugins yet. Install one from the catalogue below, add one from a link or a file, or declare it in config.toml."
+msgstr "Aucun plugin pour l'instant. Installez-en un depuis le catalogue ci-dessous, ajoutez-en un depuis un lien ou un fichier, ou déclarez-le dans config.toml."
 
 msgctxt "PluginsPage"
 msgid "Sign in"
@@ -1459,6 +1479,10 @@ msgstr "Ouvrir le hub"
 msgctxt "PluginsPage"
 msgid "Entries point to their authors' repositories; nothing is hosted or checked by ricercar beyond the file's SHA-256."
 msgstr "Les fiches pointent vers les dépôts de leurs auteurs ; ricercar n'héberge rien et ne vérifie que l'empreinte SHA-256 du fichier."
+
+msgctxt "PluginsPage"
+msgid "Other index"
+msgstr "Autre index"
 
 msgctxt "PluginsPage"
 msgid "Filter plugins"

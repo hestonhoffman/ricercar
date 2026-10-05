@@ -202,6 +202,9 @@ pub struct OnlineConfig {
     /// Look for a new ricercar release (GitHub) at most once a day, and for
     /// updates of plugins installed from the catalogue.
     pub updates: bool,
+    /// Other plugin indexes (same format as the hub's), read with it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plugin_indexes: Vec<String>,
 }
 
 impl Default for OnlineConfig {
@@ -212,12 +215,13 @@ impl Default for OnlineConfig {
             radio: true,
             plugin_catalog: true,
             updates: true,
+            plugin_indexes: Vec::new(),
         }
     }
 }
 
 /// A source plugin: an executable speaking JSON-RPC on stdio
-/// (docs/plugins.md). Declared by the user, never downloaded by ricercar.
+/// (docs/plugins.md). Declared by the user, or installed from the Plugins page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginConfig {
     /// `[a-z0-9-]+`, unique; used in `plugin://<id>/…` URIs.
@@ -235,6 +239,11 @@ pub struct PluginConfig {
     /// comes from somewhere else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
+    /// Where an installed plugin came from (`plugin::source::Origin`):
+    /// `hub` (also when absent but `version` is set), `index:<url>`,
+    /// `github:<owner>/<repo>`, `url:<url>` or `file:<path>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// `[plugins.settings]`: values of the settings the plugin declares,
     /// only those that differ from their default. Changing them does not
     /// restart the plugin (unless a setting asks for it).
@@ -255,6 +264,7 @@ impl PluginConfig {
             && self.enabled == other.enabled
             && self.version == other.version
             && self.host == other.host
+            && self.source == other.source
     }
 
     pub fn valid_id(id: &str) -> bool {

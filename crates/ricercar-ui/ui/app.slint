@@ -97,7 +97,7 @@ export component MainWindow inherits Window {
                 keys.focus();
                 return accept;
             }
-            if dialog != 0 || App.signin-open || App.install-open || App.root-path-open || App.psettings-open { return reject; }
+            if dialog != 0 || App.signin-open || App.install-open || App.link-open || App.root-path-open || App.psettings-open { return reject; }
             if e.text == " " {
                 App.play-pause();
                 return accept;
@@ -281,9 +281,23 @@ export component MainWindow inherits Window {
     if App.install-open: Dialog {
         title: App.install-title;
         body: App.install-body;
-        confirm-text: App.install-busy ? @tr("Installing…") : @tr("Install");
+        confirm-text: App.install-busy ? @tr("Installing…") : App.install-action != "" ? App.install-action : @tr("Install");
         confirm(v) => { if !App.install-busy { App.install-confirm(); } }
         cancel => { App.install-cancel(); }
+    }
+
+    if App.link-open: Dialog {
+        title: @tr("Add a plugin from a link");
+        body: @tr("Paste a link to a plugin program, to a GitHub repository (its latest release is used), or to a plugin index like the hub's. A path to a file on this computer works too. Nothing is installed or run before you confirm.");
+        with-input: true;
+        confirm-text: @tr("Continue");
+        value <=> App.link-value;
+        init => { self.focus-input(); }
+        confirm(v) => { App.plugin-add-link(v); }
+        cancel => {
+            App.link-open = false;
+            keys.focus();
+        }
     }
 
     // Without an xdg-desktop-portal there is no folder picker: type the path.

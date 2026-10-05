@@ -19,7 +19,7 @@ pub const INDEX_URL: &str =
 /// Largest index accepted.
 const MAX_INDEX: u64 = 4 * 1024 * 1024;
 /// Largest plugin binary accepted.
-const MAX_BINARY: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_BINARY: u64 = 256 * 1024 * 1024;
 
 /// A prebuilt binary for one CPU architecture, published by the author.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +49,9 @@ pub struct Entry {
     /// Arguments to start it with.
     pub args: Vec<String>,
     pub assets: Vec<Asset>,
+    /// URL of the index this entry comes from when it is not the hub's.
+    #[serde(skip)]
+    pub index: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +71,8 @@ pub enum CatalogError {
         got: String,
     },
     Io(String),
+    /// Another plugin with this id is installed from elsewhere.
+    Taken(String),
 }
 
 impl std::fmt::Display for CatalogError {
@@ -80,6 +85,10 @@ impl std::fmt::Display for CatalogError {
                 write!(f, "checksum mismatch (expected {expected}, got {got})")
             }
             CatalogError::Io(e) => write!(f, "{e}"),
+            CatalogError::Taken(id) => write!(
+                f,
+                "a plugin with the id \"{id}\" is already installed from elsewhere; remove it first"
+            ),
         }
     }
 }
@@ -134,6 +143,14 @@ impl Entry {
     pub fn installable(&self) -> bool {
         self.protocol == super::PROTOCOL && self.asset_for(current_arch()).is_some()
     }
+
+    /// The `source` recorded for a plugin installed from this entry.
+    pub fn origin(&self) -> String {
+        match &self.index {
+            Some(url) => format!("index:{url}"),
+            None => "hub".to_string(),
+        }
+    }
 }
 
 /// Parse an index; invalid entries are dropped, and a duplicate id keeps
@@ -150,7 +167,7 @@ pub fn parse_index(json: &str, local: bool) -> Result<Vec<Entry>, CatalogError> 
         .collect())
 }
 
-fn read_limited(r: impl Read, max: u64) -> Result<Vec<u8>, CatalogError> {
+pub(crate) fn read_limited(r: impl Read, max: u64) -> Result<Vec<u8>, CatalogError> {
     let mut buf = Vec::new();
     r.take(max + 1)
         .read_to_end(&mut buf)
@@ -163,7 +180,7 @@ fn read_limited(r: impl Read, max: u64) -> Result<Vec<u8>, CatalogError> {
 
 /// Bytes of an `https://` URL, or of a local `file://` URL / path when
 /// `local` (tests and the headless tours only).
-fn fetch(url: &str, max: u64, local: bool) -> Result<Vec<u8>, CatalogError> {
+pub(crate) fn fetch(url: &str, max: u64, local: bool) -> Result<Vec<u8>, CatalogError> {
     if local
         && let Some(p) = url
             .strip_prefix("file://")
@@ -193,6 +210,50 @@ pub fn fetch_index(url: &str, local: bool) -> Result<Vec<Entry>, CatalogError> {
     parse_index(&String::from_utf8_lossy(&bytes), local)
 }
 
+/// Indexes that could not be read, with why.
+pub type Unread = Vec<(String, CatalogError)>;
+
+/// The hub's index, then each other index the user added (their entries
+/// carry `index`). An id already listed keeps its first entry. Indexes
+/// that cannot be read are returned with their error; the hub's error is
+/// returned as a whole only when no index could be read.
+pub fn fetch_all(
+    hub: &str,
+    local: bool,
+    others: &[String],
+) -> Result<(Vec<Entry>, Unread), CatalogError> {
+    let mut list = Vec::new();
+    let mut failed = Vec::new();
+    let hub_err = match fetch_index(hub, local) {
+        Ok(l) => {
+            list = l;
+            None
+        }
+        Err(e) => Some(e),
+    };
+    for url in others {
+        match fetch_index(url, false) {
+            Ok(l) => {
+                for mut e in l {
+                    if list.iter().all(|x: &Entry| x.id != e.id) {
+                        e.index = Some(url.clone());
+                        list.push(e);
+                    }
+                }
+            }
+            Err(e) => failed.push((url.clone(), e)),
+        }
+    }
+    match hub_err {
+        Some(e) if failed.len() == others.len() => Err(e),
+        Some(e) => {
+            failed.insert(0, (hub.to_string(), e));
+            Ok((list, failed))
+        }
+        None => Ok((list, failed)),
+    }
+}
+
 /// Where hub plugins are installed: `<data_dir>/plugin-bin/<id>/<version>/`
 /// (next to, not inside, the plugin's own data directory).
 pub fn bin_root(data_dir: &Path) -> PathBuf {
@@ -214,11 +275,34 @@ pub fn install(entry: &Entry, root: &Path, local: bool) -> Result<PluginConfig, 
             got,
         });
     }
-    let version = if entry.version.is_empty() {
+    let path = place(&bytes, &entry.id, &entry.version, root)?;
+    Ok(PluginConfig {
+        id: entry.id.clone(),
+        command: path,
+        args: entry.args.clone(),
+        enabled: true,
+        version: Some(entry.version.clone()),
+        host: url_host(&asset.url),
+        source: Some(entry.origin()),
+        settings: Default::default(),
+    })
+}
+
+/// Put a plugin binary in `<root>/<id>/<version>/<id>` (executable) and
+/// remove the other versions of the same plugin. Returns its path.
+pub(crate) fn place(
+    bytes: &[u8],
+    id: &str,
+    version: &str,
+    root: &Path,
+) -> Result<PathBuf, CatalogError> {
+    if !PluginConfig::valid_id(id) {
+        return Err(CatalogError::Invalid(format!("bad id {id}")));
+    }
+    let version = if version.is_empty() {
         "0".to_string()
     } else {
-        entry
-            .version
+        version
             .chars()
             .map(|c| {
                 if c.is_ascii_alphanumeric() || ".-_+".contains(c) {
@@ -229,33 +313,25 @@ pub fn install(entry: &Entry, root: &Path, local: bool) -> Result<PluginConfig, 
             })
             .collect()
     };
-    let dir = root.join(&entry.id).join(&version);
+    let dir = root.join(id).join(&version);
     let io = |e: std::io::Error| CatalogError::Io(e.to_string());
     std::fs::create_dir_all(&dir).map_err(io)?;
-    let path = dir.join(&entry.id);
-    let tmp = dir.join(format!(".{}.part", entry.id));
-    std::fs::write(&tmp, &bytes).map_err(io)?;
+    let path = dir.join(id);
+    let tmp = dir.join(format!(".{id}.part"));
+    std::fs::write(&tmp, bytes).map_err(io)?;
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
     }
     std::fs::rename(&tmp, &path).map_err(io)?;
-    if let Ok(dirs) = std::fs::read_dir(root.join(&entry.id)) {
+    if let Ok(dirs) = std::fs::read_dir(root.join(id)) {
         for d in dirs.flatten() {
             if d.file_name() != version.as_str() {
                 let _ = std::fs::remove_dir_all(d.path());
             }
         }
     }
-    Ok(PluginConfig {
-        id: entry.id.clone(),
-        command: path,
-        args: entry.args.clone(),
-        enabled: true,
-        version: Some(entry.version.clone()),
-        host: url_host(&asset.url),
-        settings: Default::default(),
-    })
+    Ok(path)
 }
 
 /// Remove an installed plugin's binaries (its data directory is left:
@@ -280,10 +356,25 @@ pub struct UpdateInfo {
     pub host_changed: bool,
 }
 
-/// The update offered for an installed plugin, if the catalogue version is
-/// strictly newer (a pre-release is older than its release).
+/// Where an installed plugin came from, as recorded in its `source`; a
+/// plugin installed before `source` existed came from the hub. `None`:
+/// declared by hand.
+pub fn installed_origin(p: &PluginConfig) -> Option<String> {
+    match (&p.source, &p.version) {
+        (Some(s), _) => Some(s.clone()),
+        (None, Some(_)) => Some("hub".to_string()),
+        (None, None) => None,
+    }
+}
+
+/// The update offered for an installed plugin, if `entry` comes from the
+/// index it was installed from and its version is strictly newer (a
+/// pre-release is older than its release).
 pub fn update_info(installed: &PluginConfig, entry: &Entry) -> Option<UpdateInfo> {
     let current = installed.version.as_deref()?;
+    if installed_origin(installed)? != entry.origin() {
+        return None;
+    }
     let newer = !entry.version.trim().is_empty()
         && entry
             .version
@@ -425,6 +516,7 @@ mod tests {
             enabled: true,
             version: Some(v.into()),
             host: Some("github.com".into()),
+            source: None,
             settings: Default::default(),
         };
         e.version = "1.0.0".into();
@@ -445,6 +537,14 @@ mod tests {
         );
         e.assets[0].url = "https://evil.example/p".into();
         assert!(update_info(&installed("1.0.0"), &e).unwrap().host_changed);
+        // Only from the index it was installed from.
+        let mut other = e.clone();
+        other.index = Some("https://other.example/index.json".into());
+        assert!(update_info(&installed("1.0.0"), &other).is_none());
+        let mut from_other = installed("1.0.0");
+        from_other.source = Some(other.origin());
+        assert!(update_info(&from_other, &other).is_some());
+        assert!(update_info(&from_other, &e).is_none());
         let mut by_hand = installed("1.0.0");
         by_hand.version = None;
         assert!(!update_available(&by_hand, &e));

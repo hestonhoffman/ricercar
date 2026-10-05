@@ -868,11 +868,35 @@ fn plugins_tour(dir: std::path::PathBuf) {
     with_ui(|ui| {
         ui.plugins.borrow_mut().index_override = Some(index_path.display().to_string());
     });
+    let file_bin = bin.clone();
     let album = |r: &str, t: &str| crate::plugins::browse_arg("demo", r, t);
     let steps: Vec<(&str, Step)> = vec![
         (
             "plugins-catalogue",
             (1500, Box::new(|ui| ui.navigate(Page::Plugins, "", true))),
+        ),
+        (
+            "plugins-add-link",
+            (
+                900,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.set_link_value("https://github.com/someone/ricercar-example".into());
+                    app.set_link_open(true);
+                }),
+            ),
+        ),
+        (
+            "plugins-add-file",
+            (
+                900,
+                Box::new(move |ui| {
+                    ui.app().set_link_open(false);
+                    if let Ok(c) = ricercar_core::plugin::source::read_file(&file_bin) {
+                        crate::plugins::confirm_binary(ui, c);
+                    }
+                }),
+            ),
         ),
         (
             "plugins-install",

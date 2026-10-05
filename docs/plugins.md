@@ -27,8 +27,9 @@
   can crash, hang or be slow without taking the player down.
 - **Explicit user choice.** ricercar bundles no plugin and never installs or
   runs one on its own. The user either declares an executable in the config,
-  or installs one from the [community hub](#community-hub) on the Plugins
-  page, one explicit confirmation per plugin.
+  or installs one on the Plugins page, from the
+  [community hub](#community-hub) or from [elsewhere](#other-sources), one
+  explicit confirmation per plugin.
 
 ### Non-goals (v1)
 
@@ -96,10 +97,43 @@ Settings → Online extras → Plugin catalogue is off:
   if the binary now comes from another host, the app asks again before
   installing. It does the same as Install with the newer version and removes
   the old one. **Remove** deletes the table and,
-  for hub installs only, the binaries; the plugin's data directory stays.
-- `RICERCAR_PLUGIN_INDEX` points the app at another index (a URL or a local
+  for plugins installed from the Plugins page, the binaries; the plugin's data directory stays.
+- `RICERCAR_PLUGIN_INDEX` replaces the hub's index (a URL or a local
   file, whose assets may then be `file://`), for tests and the screenshot
   tour.
+
+## Other sources
+
+A plugin does not have to be listed on the hub. **Add from a link** on the
+Plugins page takes:
+
+- **A link to the plugin program** (`https://` only, 256 MB at most). If
+  `<link>.sha256` exists next to it, the file must match it.
+- **A GitHub repository** (`https://github.com/<owner>/<repo>`): the binary
+  for this computer in its latest release, picked by name (`x86_64`,
+  `amd64`, `x64` / `aarch64`, `arm64`; archives, packages, checksums and
+  other systems are skipped; a name with `linux` wins). It is checked
+  against `<asset>.sha256` or a `SHA256SUMS` / `checksums.txt` file of the
+  release when there is one. The release tag becomes the installed
+  version, and a newer release is offered as an update.
+- **Another index** in the hub's format: after confirmation it is added to
+  `[online] plugin_indexes` and read with the hub's, its entries listed
+  after the hub's (an id already listed keeps its first entry). A plugin
+  installed from it is updated from it only. The Plugins page lists these
+  indexes with a Remove button.
+- **A path** to a file on this computer, like **Add a file**, which opens
+  the file chooser. The file is copied: a plugin built again has to be
+  added again, and replaces the one added from a file before.
+
+Nothing is run before the user confirms. The dialog says where the file
+comes from, whether a published checksum matched, and its SHA-256. ricercar
+then starts the program once, with throwaway data and cache directories,
+to read its id, name and version from `initialize`, stops it, and installs
+it like a hub plugin (`plugin-bin/<id>/<version>/<id>`, with `source` set).
+A program that does not answer `initialize` with a valid id is refused. If
+a plugin with that id is already declared from somewhere else (or by hand),
+the install stops: remove the other one first. Reading other indexes and
+looking for new releases follow the Plugin catalogue setting.
 
 ## Declaring a plugin
 
@@ -111,8 +145,10 @@ id = "example"                 # [a-z0-9-]+, unique; used in plugin:// URIs
 command = "/usr/local/bin/example-plugin"
 args = ["--serve"]
 enabled = true
-# version = "1.2.0"            # set by installs from the hub only
+# version = "1.2.0"            # set by installs from the Plugins page only
 # host = "github.com"          # likewise: where the binary was downloaded
+# source = "hub"               # likewise: hub, index:<url>, github:<owner>/<repo>,
+#                              # url:<link> or file:<path>
 
 [plugins.settings]             # optional: values of the plugin's settings
 quality = "lossless"

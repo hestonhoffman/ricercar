@@ -7,6 +7,7 @@ mod content;
 mod host;
 mod rpc;
 pub mod settings;
+pub mod source;
 
 use serde::{Deserialize, Serialize};
 

@@ -246,7 +246,8 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
   to exercise the error paths (see the top of its `main.rs`).
 - `RICERCAR_SNAPSHOT_TOUR=plugins` installs it through the Plugins page
   from a local catalogue (it must sit next to the `ricercar` binary), then
-  captures the catalogue, the install dialog, the sign-in dialog, the browse
+  captures the catalogue, the "add from a link" dialog, the confirmation of
+  an install from a file, the install dialog, the sign-in dialog, the browse
   pages, the plugin library in the Albums, Artists and Tracks pages, a plugin
   album page, a playing plugin track, a search mixing both sources, playlist
   editing on the service (an editable playlist and its entry menu, "Add to

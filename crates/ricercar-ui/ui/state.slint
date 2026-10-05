@@ -126,7 +126,7 @@ export struct DeviceRow {
 export struct PluginRow {
     id: string,
     name: string,
-    // "id · version"
+    // "id · version · where it came from"
     detail: string,
     status: string,
     // 0 fine, 1 starting / restarting, 2 needs attention
@@ -135,7 +135,7 @@ export struct PluginRow {
     // has a sign-in, and is signed in
     auth: bool,
     signed-in: bool,
-    // installed from the hub (removable, updatable)
+    // installed by ricercar (hub, index, link or file)
     from-hub: bool,
     // the hub has another version
     update: bool,
@@ -604,10 +604,20 @@ export global App {
     callback catalog-install(string);
     callback catalog-open-repo(string);
     callback open-hub();
+    // other indexes the user added, read with the hub's
+    in property <[string]> plugin-indexes;
+    callback catalog-remove-index(string);
+    // add a plugin from outside the hub
+    callback plugin-add-file();
+    in-out property <bool> link-open;
+    in-out property <string> link-value;
+    callback plugin-add-link(string);
     // install / update confirmation
     in-out property <bool> install-open;
     in property <string> install-title;
     in property <string> install-body;
+    // confirm button label; empty for "Install"
+    in property <string> install-action;
     in property <bool> install-busy;
     callback install-confirm();
     callback install-cancel();
