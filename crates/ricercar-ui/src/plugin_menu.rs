@@ -12,14 +12,12 @@ use std::rc::Rc;
 
 use ricercar_core::TrackInfo;
 use ricercar_core::library::Track;
-use ricercar_core::plugin::{ActionKind, Item, ItemKind, TRACKS_MAX, parse_plugin_uri};
+use ricercar_core::plugin::{ActionKind, Item, ItemKind, TRACKS_MAX, parse_plugin_uri, plugin_uri};
 use ricercar_core::{EnqueueAt, PlayContext};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::app::{Ui, post};
-use crate::plugins::{
-    ALBUM_CARD, CARD, browse_arg, card_target, error_text, host, name_of, parse_arg,
-};
+use crate::plugins::{ALBUM_CARD, browse_arg, card_target, error_text, host, name_of, parse_arg};
 use crate::text::t;
 use crate::{ItemAction, Page, TrackMenu};
 
@@ -226,6 +224,53 @@ fn menu_target(ui: &Ui, is_album: bool) -> (Option<(String, Item)>, bool, bool) 
     (item, album, artist)
 }
 
+/// What an album menu acts on, from its card id.
+#[derive(Debug, PartialEq, Eq)]
+enum MenuKind {
+    LocalAlbum,
+    LocalPlaylist(i64),
+    PluginAlbum,
+    /// A plugin playlist, artist, folder…: plugin id, ref.
+    PluginItem(String, String),
+}
+
+fn menu_kind(card: &str) -> MenuKind {
+    if let Some(pid) = card.strip_prefix(crate::views::PLAYLIST_CARD) {
+        return MenuKind::LocalPlaylist(pid.parse().unwrap_or(0));
+    }
+    match card_target(card) {
+        None => MenuKind::LocalAlbum,
+        Some((_, true)) => MenuKind::PluginAlbum,
+        Some((arg, false)) => parse_arg(arg)
+            .map(|(id, r, _)| MenuKind::PluginItem(id, r))
+            .unwrap_or(MenuKind::PluginAlbum),
+    }
+}
+
+/// An album menu's own entries: whether it acts on a local playlist,
+/// offers "Favorite / unfavorite", and renames or deletes the playlist of
+/// the open page.
+fn album_menu_flags(ui: &Ui) -> (bool, bool, bool) {
+    let card = ui.window.global::<TrackMenu>().get_album_id().to_string();
+    let app = ui.app();
+    match menu_kind(&card) {
+        MenuKind::LocalAlbum | MenuKind::PluginAlbum => (false, true, false),
+        MenuKind::LocalPlaylist(pid) => {
+            let open = app.get_page() == Page::Playlist && i64::from(app.get_pl_id()) == pid;
+            (true, false, open)
+        }
+        MenuKind::PluginItem(id, reference) => {
+            // A favourite state, or a plugin that keeps favourites.
+            let fav = crate::plugin_favs::known(&plugin_uri(&id, &reference)).is_some()
+                || host(ui).status(&id).is_some_and(|s| s.caps.favorites);
+            let edit = app.get_page() == Page::Browse
+                && app.get_br_editable()
+                && app.get_br_menu_id() == card.as_str();
+            (false, fav, edit)
+        }
+    }
+}
+
 /// A context menu opened: fill its plugin part.
 pub fn menu_opened(ui: &Ui, is_album: bool) {
     let (target, album, artist) = menu_target(ui, is_album);
@@ -246,6 +291,14 @@ pub fn menu_opened(ui: &Ui, is_album: bool) {
     app.set_menu_actions(ModelRc::new(VecModel::from(actions)));
     app.set_menu_album_nav(album);
     app.set_menu_artist_nav(artist);
+    let (local_playlist, fav, edit) = if is_album {
+        album_menu_flags(ui)
+    } else {
+        (false, false, false)
+    };
+    app.set_menu_local_playlist(local_playlist);
+    app.set_menu_fav(fav);
+    app.set_menu_edit(edit);
     app.set_action_busy(-1);
 }
 
@@ -279,8 +332,9 @@ pub fn run_action(ui: &Rc<Ui>, index: usize, append: bool) {
             match r {
                 Ok(infos) if infos.is_empty() => ui.toast(t("Nothing playable here"), true),
                 Ok(infos) if append => {
+                    let n = infos.len();
                     ui.ctx.ctl.enqueue(infos, EnqueueAt::End);
-                    ui.toast(t("Added to the queue"), false);
+                    ui.toast(crate::text::queued(n, false), false);
                 }
                 Ok(infos) => ui.ctx.ctl.play_tracks(infos, 0, PlayContext::None),
                 Err(e) => ui.toast(error_text(&name_of(ui, &id), &e), true),
@@ -289,20 +343,14 @@ pub fn run_action(ui: &Rc<Ui>, index: usize, append: bool) {
     });
 }
 
-/// The browse page opened on a plugin item: offer its menu when the item
-/// has actions (asked with `item.get` when it was not seen in a list).
+/// The browse page opened on a plugin item: its menu gets the item's
+/// actions, its header the item's heart (asked with `item.get` when it was
+/// not seen in a list).
 pub fn browse_opened(ui: &Ui, id: &str, reference: &str, serial: u64) {
-    fn menu_id(id: &str, it: &Item) -> String {
-        if it.actions.is_empty() {
-            return String::new();
-        }
-        format!("{CARD}{}", browse_arg(id, &it.reference, &it.title))
-    }
     if let Some(it) = find_item(ui, id, reference) {
-        ui.app().set_br_menu_id(menu_id(id, &it).into());
+        ui.app().set_br_actions(!it.actions.is_empty());
         return;
     }
-    ui.app().set_br_menu_id("".into());
     let (h, id, reference) = (host(ui), id.to_string(), reference.to_string());
     std::thread::spawn(move || {
         let Ok(it) = h.item_get(&id, &reference) else {
@@ -310,8 +358,10 @@ pub fn browse_opened(ui: &Ui, id: &str, reference: &str, serial: u64) {
         };
         post(move |ui| {
             remember(ui, &id, std::slice::from_ref(&it));
+            crate::plugin_favs::remember(ui, &id, std::slice::from_ref(&it));
             if ui.plugins.borrow().browse_serial == serial {
-                ui.app().set_br_menu_id(menu_id(&id, &it).into());
+                ui.app().set_br_actions(!it.actions.is_empty());
+                crate::plugin_favs::show_browse(ui, &id, &reference);
             }
         });
     });
@@ -323,4 +373,27 @@ pub fn wire(ui: &Rc<Ui>) {
     app.on_item_action(|i, append| {
         crate::app::with_ui(|ui| run_action(ui, i.max(0) as usize, append))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn album_menus_know_what_they_act_on() {
+        let arg = browse_arg("demo", "playlist/1", "Demo mix");
+        assert_eq!(
+            menu_kind(&format!("{}{arg}", crate::plugins::CARD)),
+            MenuKind::PluginItem("demo".into(), "playlist/1".into())
+        );
+        assert_eq!(
+            menu_kind(&format!("{ALBUM_CARD}{arg}")),
+            MenuKind::PluginAlbum
+        );
+        assert_eq!(
+            menu_kind(&format!("{}12", crate::views::PLAYLIST_CARD)),
+            MenuKind::LocalPlaylist(12)
+        );
+        assert_eq!(menu_kind("0123abcd"), MenuKind::LocalAlbum);
+    }
 }

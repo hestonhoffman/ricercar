@@ -27,6 +27,8 @@ export component IconButton inherits Rectangle {
     in property <string> tooltip;
     in property <bool> round: true;
     out property <bool> has-hover: ta.has-hover;
+    // reached with the keyboard (a click leaves the focus where it was)
+    out property <bool> keyboard-focus: fs.has-focus;
     callback clicked();
     width: size;
     height: size;

@@ -438,6 +438,7 @@ fn load_playlist(ui: &Rc<Ui>, id: i64) {
     let Some(p) = lib.playlist(id) else { return };
     let tracks = lib.playlist_tracks(id);
     app.set_pl_id(id as i32);
+    app.set_pl_card(format!("{PLAYLIST_CARD}{id}").into());
     app.set_pl_name(p.name.into());
     app.set_pl_count(tracks.len() as i32);
     let total: u64 = tracks.iter().map(|t| t.duration_ms).sum();
@@ -774,17 +775,24 @@ pub fn show_in_folder(path: &str) {
 }
 
 fn play_or_queue(ui: &Ui, tracks: &[Track], ctx: PlayContext, action: &str) {
+    play_or_queue_infos(ui, infos(tracks), ctx, action);
+}
+
+/// Play, shuffle or queue (`next`, else at the end) a whole collection;
+/// queuing says how many tracks went in.
+pub fn play_or_queue_infos(ui: &Ui, infos: Vec<TrackInfo>, ctx: PlayContext, action: &str) {
     let ctl = &ui.ctx.ctl;
+    let n = infos.len();
     match action {
-        "play" => ctl.play_tracks(infos(tracks), 0, ctx),
-        "shuffle" => ctl.play_shuffled(infos(tracks), ctx),
+        "play" => ctl.play_tracks(infos, 0, ctx),
+        "shuffle" => ctl.play_shuffled(infos, ctx),
         "next" => {
-            ctl.enqueue(infos(tracks), EnqueueAt::Next);
-            ui.toast(t("Will play next"), false);
+            ctl.enqueue(infos, EnqueueAt::Next);
+            ui.toast(crate::text::queued(n, true), false);
         }
         _ => {
-            ctl.enqueue(infos(tracks), EnqueueAt::End);
-            ui.toast(t("Added to the queue"), false);
+            ctl.enqueue(infos, EnqueueAt::End);
+            ui.toast(crate::text::queued(n, false), false);
         }
     }
 }
@@ -797,22 +805,9 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
     let ctl = &ui.ctx.ctl;
     match action {
         "artist-radio" => return crate::details::artist_radio(ui),
-        "artist-play" | "artist-shuffle" => {
-            let (own, appears) = lib.artist_albums(id);
-            let mut tracks: Vec<Track> = own.iter().flat_map(|a| lib.album_tracks(&a.id)).collect();
-            if tracks.is_empty() {
-                tracks = appears
-                    .iter()
-                    .flat_map(|a| lib.album_tracks(&a.id))
-                    .collect();
-            }
-            let ctx = PlayContext::Artist(id.to_string());
-            if action == "artist-shuffle" {
-                ctl.play_shuffled(infos(&tracks), ctx);
-            } else {
-                ctl.play_tracks(infos(&tracks), 0, ctx);
-            }
-            return;
+        // The albums the artist page lists, plugin ones included.
+        a if a.starts_with("artist-") && a != "artist-radio" => {
+            return crate::plugins::artist_action(ui, id, &a["artist-".len()..]);
         }
         "genre-shuffle" => {
             let tracks: Vec<Track> = lib
@@ -825,14 +820,24 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
         }
         _ => {}
     }
-    // A local playlist tile (search): play or queue its tracks.
+    // A local playlist (its page's header, a search tile): all its tracks,
+    // from the library.
     if let Some(pid) = id.strip_prefix(PLAYLIST_CARD) {
         let pid: i64 = pid.parse().unwrap_or(0);
+        if action == "export" {
+            return export_playlist(ui, pid);
+        }
         let tracks = lib.playlist_tracks(pid);
-        if tracks.is_empty() || !matches!(action, "play" | "shuffle" | "next" | "queue") {
+        if tracks.is_empty() {
             return;
         }
-        return play_or_queue(ui, &tracks, PlayContext::Playlist(pid), action);
+        return match action {
+            "play" | "shuffle" | "next" | "queue" => {
+                play_or_queue(ui, &tracks, PlayContext::Playlist(pid), action)
+            }
+            a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], &tracks),
+            _ => {}
+        };
     }
     let tracks = lib.album_tracks(id);
     if tracks.is_empty() {
@@ -866,6 +871,29 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
         a if a.starts_with("pl:") => add_to_playlist(ui, &a[3..], &tracks),
         _ => {}
     }
+}
+
+/// Write a local playlist to `Playlists/<name>.m3u8` in the music folder.
+fn export_playlist(ui: &Ui, id: i64) {
+    let lib = ui.ctx.lib.clone();
+    // Database reads and file writes stay off the UI thread.
+    std::thread::spawn(move || {
+        let name = lib.playlist(id).map(|p| p.name).unwrap_or_default();
+        let dir = crate::sys::music_dir().join("Playlists");
+        let safe: String = name
+            .chars()
+            .map(|c| if c == '/' { '-' } else { c })
+            .collect();
+        let dest = dir.join(format!("{safe}.m3u8"));
+        let r = std::fs::create_dir_all(&dir).and_then(|()| lib.export_m3u(id, &dest));
+        crate::app::post(move |ui| match r {
+            Ok(()) => ui.toast(
+                format!("{} {}", t("Playlist exported to"), dest.display()),
+                false,
+            ),
+            Err(e) => ui.toast(e.to_string(), true),
+        });
+    });
 }
 
 pub fn wire(ui: &Rc<Ui>) {
@@ -967,30 +995,7 @@ pub fn wire(ui: &Rc<Ui>) {
             }
         })
     });
-    app.on_playlist_export(|id| {
-        with_ui(|ui| {
-            let lib = ui.ctx.lib.clone();
-            // Database reads and file writes stay off the UI thread.
-            std::thread::spawn(move || {
-                let id = id as i64;
-                let name = lib.playlist(id).map(|p| p.name).unwrap_or_default();
-                let dir = crate::sys::music_dir().join("Playlists");
-                let safe: String = name
-                    .chars()
-                    .map(|c| if c == '/' { '-' } else { c })
-                    .collect();
-                let dest = dir.join(format!("{safe}.m3u8"));
-                let r = std::fs::create_dir_all(&dir).and_then(|()| lib.export_m3u(id, &dest));
-                crate::app::post(move |ui| match r {
-                    Ok(()) => ui.toast(
-                        format!("{} {}", t("Playlist exported to"), dest.display()),
-                        false,
-                    ),
-                    Err(e) => ui.toast(e.to_string(), true),
-                });
-            });
-        })
-    });
+    app.on_playlist_export(|id| with_ui(|ui| export_playlist(ui, id as i64)));
     app.on_playlist_import(|| {
         std::thread::spawn(|| {
             let file = rfd::FileDialog::new()

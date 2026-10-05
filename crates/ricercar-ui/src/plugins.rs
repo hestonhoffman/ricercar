@@ -11,7 +11,7 @@ use ricercar_core::library::Track;
 use ricercar_core::plugin::{
     AuthState, Item, ItemKind, PluginError, PluginStatus, RunState, catalog,
 };
-use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
+use ricercar_core::{PlayContext, TrackInfo};
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use crate::app::{RowOpts, TILE, Ui, post, set_rows, track_rows, with_ui};
@@ -34,8 +34,8 @@ pub fn card_target(id: &str) -> Option<(&str, bool)> {
 }
 /// Items asked per page (the protocol allows 200).
 const PAGE: usize = 100;
-/// Most tracks gathered to play a plugin album or playlist.
-const PLAY_MAX: usize = 1000;
+/// Most tracks gathered to play, queue or copy a plugin album or playlist.
+const PLAY_MAX: usize = 5000;
 
 #[derive(Default)]
 pub struct PluginsView {
@@ -776,6 +776,9 @@ pub fn load_browse(ui: &Rc<Ui>, arg: &str) {
     };
     app.set_br_title(title.into());
     app.set_br_sub(name_of(ui, &id).into());
+    app.set_br_menu_id(format!("{CARD}{arg}").into());
+    app.set_br_actions(false);
+    crate::plugin_favs::show_browse(ui, &id, &reference);
     app.set_br_editable(false);
     app.set_br_can_move(false);
     let serial = {
@@ -870,16 +873,110 @@ fn load_more(ui: &Ui) {
     }
 }
 
-/// Every track under a plugin item (pages, up to `PLAY_MAX`).
+/// Every playable track under a plugin item, all its pages read (up to
+/// `PLAY_MAX`), not only those a page shows.
 fn all_tracks(
     h: &ricercar_core::plugin::PluginHost,
     id: &str,
     reference: &str,
+    max: usize,
+) -> Result<Vec<TrackInfo>, PluginError> {
+    gather(
+        |offset| {
+            h.browse_list(id, reference, offset, 200)
+                .map(|(items, _, more)| (items, more))
+        },
+        id,
+        max.min(PLAY_MAX),
+    )
+}
+
+/// The tracks of a page's album cards (an artist's discography), up to
+/// `PLAY_MAX`: the local albums first, then the plugin ones, each group in
+/// the page's order. `local` reads a local album, `plugin` a plugin album
+/// (id, ref, most tracks wanted); a plugin album that fails is skipped.
+pub fn collection_tracks(
+    cards: &[String],
+    mut local: impl FnMut(&str) -> Vec<TrackInfo>,
+    mut plugin: impl FnMut(&str, &str, usize) -> Result<Vec<TrackInfo>, PluginError>,
+    max: usize,
+) -> Vec<TrackInfo> {
+    let mut out = Vec::new();
+    for c in cards.iter().filter(|c| card_target(c).is_none()) {
+        out.extend(local(c));
+        if out.len() >= max {
+            out.truncate(max);
+            return out;
+        }
+    }
+    let refs = cards
+        .iter()
+        .filter_map(|c| card_target(c).and_then(|(arg, _)| parse_arg(arg)));
+    for (id, reference, _) in refs {
+        if let Ok(infos) = plugin(&id, &reference, max - out.len()) {
+            out.extend(infos);
+        }
+        if out.len() >= max {
+            break;
+        }
+    }
+    out.truncate(max);
+    out
+}
+
+/// Play, shuffle or queue (`next`, `queue`) every track of the album cards
+/// of the artist page `name`: local ones from the library, plugin ones read
+/// off the UI thread.
+pub fn artist_action(ui: &Rc<Ui>, name: &str, action: &str) {
+    let app = ui.app();
+    if app.get_ar_busy() {
+        return;
+    }
+    let ids = |m: &crate::app::Rows<AlbumCard>| -> Vec<String> {
+        (0..m.row_count())
+            .filter_map(|i| m.row_data(i))
+            .map(|c| c.id.to_string())
+            .collect()
+    };
+    let mut cards = ids(&ui.models.ar_own);
+    if cards.is_empty() {
+        cards = ids(&ui.models.ar_appears);
+    }
+    if cards.is_empty() {
+        return;
+    }
+    app.set_ar_busy(true);
+    let (lib, h) = (ui.ctx.lib.clone(), host(ui));
+    let (name, action) = (name.to_string(), action.to_string());
+    std::thread::spawn(move || {
+        let infos = collection_tracks(
+            &cards,
+            |id| lib.album_tracks(id).iter().map(TrackInfo::from).collect(),
+            |id, reference, max| all_tracks(&h, id, reference, max),
+            PLAY_MAX,
+        );
+        post(move |ui| {
+            ui.app().set_ar_busy(false);
+            if infos.is_empty() {
+                return ui.toast(t("Nothing playable here"), true);
+            }
+            crate::views::play_or_queue_infos(ui, infos, PlayContext::Artist(name), &action);
+        });
+    });
+}
+
+/// The playable tracks of plugin `id`'s list read page by page with
+/// `page(offset)` (items, more follow), up to `max`. Unplayable entries are
+/// skipped; bounded even for a plugin that always says more follow.
+fn gather(
+    mut page: impl FnMut(usize) -> Result<(Vec<Item>, bool), PluginError>,
+    id: &str,
+    max: usize,
 ) -> Result<Vec<TrackInfo>, PluginError> {
     let mut out = Vec::new();
     let mut offset = 0;
-    loop {
-        let (items, _, more) = h.browse_list(id, reference, offset, 200)?;
+    for _ in 0..(max / 50 + 5) {
+        let (items, more) = page(offset)?;
         offset += items.len();
         out.extend(
             items
@@ -887,10 +984,12 @@ fn all_tracks(
                 .filter(|i| i.is_playable())
                 .map(|i| i.to_track_info(id)),
         );
-        if !more || items.is_empty() || out.len() >= PLAY_MAX {
-            return Ok(out);
+        if !more || items.is_empty() || out.len() >= max {
+            break;
         }
     }
+    out.truncate(max);
+    Ok(out)
 }
 
 /// Context-menu and double-click actions on a plugin card.
@@ -914,27 +1013,15 @@ pub fn card_action(ui: &Rc<Ui>, arg: &str, action: &str) {
     }
     let (h, action) = (host(ui), action.to_string());
     std::thread::spawn(move || {
-        let r = all_tracks(&h, &id, &reference);
+        let r = all_tracks(&h, &id, &reference, PLAY_MAX);
         post(move |ui| match r {
-            Ok(infos) if !infos.is_empty() => {
-                let ctl = &ui.ctx.ctl;
-                match action.as_str() {
-                    "play" => ctl.play_tracks(infos, 0, PlayContext::None),
-                    "shuffle" => ctl.play_shuffled(infos, PlayContext::None),
-                    "next" => {
-                        ctl.enqueue(infos, EnqueueAt::Next);
-                        ui.toast(t("Will play next"), false);
-                    }
-                    "queue" => {
-                        ctl.enqueue(infos, EnqueueAt::End);
-                        ui.toast(t("Added to the queue"), false);
-                    }
-                    a => {
-                        let tracks: Vec<Track> = infos.iter().map(Track::from_info).collect();
-                        crate::views::add_to_playlist(ui, &a[3..], &tracks);
-                    }
+            Ok(infos) if !infos.is_empty() => match action.as_str() {
+                a if a.starts_with("pl:") => {
+                    let tracks: Vec<Track> = infos.iter().map(Track::from_info).collect();
+                    crate::views::add_to_playlist(ui, &a[3..], &tracks);
                 }
-            }
+                a => crate::views::play_or_queue_infos(ui, infos, PlayContext::None, a),
+            },
             Ok(_) => ui.toast(t("Nothing playable here"), true),
             Err(e) => ui.toast(error_text(&name_of(ui, &id), &e), true),
         });
@@ -958,6 +1045,11 @@ pub fn favorite(ui: &Ui, id: &str, reference: &str, on: bool) {
 }
 
 fn play_page(ui: &Rc<Ui>, shuffle: bool) {
+    // Pages left to read: the whole list, from the plugin.
+    if ui.app().get_br_more() {
+        let arg = ui.app().get_br_arg().to_string();
+        return card_action(ui, &arg, if shuffle { "shuffle" } else { "play" });
+    }
     let tracks = ui
         .st
         .borrow()
@@ -1078,6 +1170,18 @@ fn edit_sources(ui: &Ui) -> Vec<EditSource> {
         .collect()
 }
 
+/// Leave out of the targets the playlist a menu acts on (`card`: a local
+/// playlist or plugin card id): copying it into itself makes no sense.
+fn without_own(local: &mut Vec<(i64, String)>, plugins: &mut [EditSource], card: &str) {
+    if let Some(pid) = card.strip_prefix(crate::views::PLAYLIST_CARD) {
+        local.retain(|(id, _)| id.to_string() != pid);
+    } else if let Some((id, reference, _)) = card_target(card).and_then(|(a, _)| parse_arg(a)) {
+        for (_, _, pls) in plugins.iter_mut().filter(|(p, _, _)| *p == id) {
+            pls.retain(|(r, _)| *r != reference);
+        }
+    }
+}
+
 /// Plugin of a track (`None`: a local file).
 fn track_source(tr: &Track) -> Option<String> {
     ricercar_core::plugin::parse_plugin_uri(&tr.path).map(|(id, _)| id)
@@ -1094,6 +1198,19 @@ fn menu_sources(ui: &Ui, what: i32) -> Vec<Option<String>> {
             .unwrap_or_default(),
         2 => {
             let id = menu.get_album_id();
+            // A local playlist: where its tracks come from.
+            if let Some(pid) = id.strip_prefix(crate::views::PLAYLIST_CARD) {
+                let mut sources: Vec<Option<String>> = ui
+                    .ctx
+                    .lib
+                    .playlist_tracks(pid.parse().unwrap_or(0))
+                    .iter()
+                    .map(track_source)
+                    .collect();
+                sources.sort();
+                sources.dedup();
+                return sources;
+            }
             vec![card_target(&id).and_then(|(arg, _)| parse_arg(arg).map(|(p, _, _)| p))]
         }
         _ => Vec::new(),
@@ -1106,14 +1223,18 @@ fn menu_sources(ui: &Ui, what: i32) -> Vec<Option<String>> {
 pub fn show_playlist_targets(ui: &Ui, what: i32) {
     let sources = menu_sources(ui, what);
     let sources: Vec<Option<&str>> = sources.iter().map(Option::as_deref).collect();
-    let local: Vec<(i64, String)> = ui
+    let mut local: Vec<(i64, String)> = ui
         .ctx
         .lib
         .playlists()
         .into_iter()
         .map(|p| (p.id, p.name))
         .collect();
-    let plugins = edit_sources(ui);
+    let mut plugins = edit_sources(ui);
+    if what == 2 {
+        let card = ui.window.global::<crate::TrackMenu>().get_album_id();
+        without_own(&mut local, &mut plugins, &card);
+    }
     let rows: Vec<crate::PlaylistTarget> =
         playlist_targets(t("Library"), &local, &plugins, &sources)
             .into_iter()
@@ -1867,7 +1988,7 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                             lib.artists.len(),
                             lib.tracks.len()
                         );
-                        for list in [&lib.albums, &lib.artists, &lib.tracks] {
+                        for list in [&lib.albums, &lib.artists, &lib.tracks, &lib.playlists] {
                             crate::plugin_favs::remember(ui, &id, list);
                         }
                         let order: Vec<String> =
@@ -2700,6 +2821,144 @@ mod tests {
         let only = playlist_targets("Library", &[], &plugins, &[Some("a")]);
         assert_eq!(only.len(), 2);
         assert!(only[0].header && only[0].name == "Service A");
+    }
+
+    #[test]
+    fn a_playlist_is_not_its_own_target() {
+        let mut local = vec![(1, "Late night".to_string()), (2, "Focus".to_string())];
+        let pls = vec![
+            ("playlist/1".to_string(), "Mix".to_string()),
+            ("playlist/2".to_string(), "Picks".to_string()),
+        ];
+        let mut plugins = vec![
+            ("a".to_string(), "Service A".to_string(), pls.clone()),
+            ("b".to_string(), "Service B".to_string(), pls.clone()),
+        ];
+        without_own(
+            &mut local,
+            &mut plugins,
+            &format!("{}2", crate::views::PLAYLIST_CARD),
+        );
+        assert_eq!(local, [(1, "Late night".to_string())]);
+        assert_eq!(plugins[0].2.len(), 2);
+        let card = format!("{CARD}{}", browse_arg("a", "playlist/1", "Mix"));
+        without_own(&mut local, &mut plugins, &card);
+        assert_eq!(
+            plugins[0].2,
+            [("playlist/2".to_string(), "Picks".to_string())]
+        );
+        assert_eq!(plugins[1].2, pls);
+        // An album: nothing to leave out.
+        without_own(&mut local, &mut plugins, "local-album");
+        assert_eq!(local.len(), 1);
+        // Its source has no playlist left: no heading for it.
+        plugins[0].2.clear();
+        let rows = playlist_targets("Library", &local, &plugins, &[Some("a")]);
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn an_artist_plays_its_local_albums_then_its_plugin_albums() {
+        let plugin_card = |r: &str| format!("{ALBUM_CARD}{}", browse_arg("demo", r, r));
+        let info = |uri: String| TrackInfo {
+            uri,
+            ..Default::default()
+        };
+        // The page's order: a plugin album between two local ones.
+        let cards = [
+            "b-local".to_string(),
+            plugin_card("album/2"),
+            "a-local".to_string(),
+            plugin_card("album/1"),
+            plugin_card("album/broken"),
+        ];
+        let got = collection_tracks(
+            &cards,
+            |id| (1..=2).map(|n| info(format!("{id}/{n}"))).collect(),
+            |id, r, _| {
+                if r == "album/broken" {
+                    return Err(PluginError::NotFound);
+                }
+                Ok(vec![info(format!("{id}:{r}"))])
+            },
+            100,
+        );
+        let uris: Vec<&str> = got.iter().map(|i| i.uri.as_str()).collect();
+        assert_eq!(
+            uris,
+            [
+                "b-local/1",
+                "b-local/2",
+                "a-local/1",
+                "a-local/2",
+                "demo:album/2",
+                "demo:album/1"
+            ]
+        );
+        // Bounded: plugin albums are asked for what is left.
+        let mut asked = Vec::new();
+        let few = collection_tracks(
+            &cards,
+            |id| vec![info(id.to_string())],
+            |_, r, max| {
+                asked.push(max);
+                Ok((0..5).map(|n| info(format!("{r}/{n}"))).collect())
+            },
+            4,
+        );
+        assert_eq!(few.len(), 4);
+        assert_eq!(asked, [2]);
+    }
+
+    #[test]
+    fn every_page_is_gathered_without_unplayable_entries() {
+        let track = |n: usize, playable: bool| Item {
+            reference: format!("track/{n}"),
+            kind: ItemKind::Track,
+            title: format!("T{n}"),
+            playable: Some(playable),
+            ..Default::default()
+        };
+        // Three pages of two; the second entry of each cannot be played.
+        let mut asked = Vec::new();
+        let got = gather(
+            |offset| {
+                asked.push(offset);
+                let page = vec![track(offset, true), track(offset + 1, false)];
+                Ok((page, offset < 4))
+            },
+            "demo",
+            100,
+        )
+        .unwrap();
+        assert_eq!(asked, [0, 2, 4]);
+        let refs: Vec<_> = got.iter().map(|i| i.uri.clone()).collect();
+        assert_eq!(
+            refs,
+            [0, 2, 4].map(|n| ricercar_core::plugin::plugin_uri("demo", &format!("track/{n}")))
+        );
+        // Bounded: a list that never ends stops at `max`.
+        let endless = gather(
+            |o| Ok(((o..o + 3).map(|n| track(n, true)).collect(), true)),
+            "demo",
+            7,
+        )
+        .unwrap();
+        assert_eq!(endless.len(), 7);
+        // …and after a few pages when they hold next to nothing.
+        let mut calls = 0;
+        let tiny = gather(
+            |o| {
+                calls += 1;
+                Ok((vec![track(o, false)], true))
+            },
+            "demo",
+            100,
+        )
+        .unwrap();
+        assert!(tiny.is_empty() && calls == 100 / 50 + 5);
+        // Errors come through.
+        assert!(gather(|_| Err(PluginError::NotFound), "demo", 7).is_err());
     }
 
     #[test]

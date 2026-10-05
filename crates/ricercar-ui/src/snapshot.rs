@@ -289,10 +289,41 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            // Its header's menu (the "…" button), as for an album.
+            "playlist-menu",
+            (
+                300,
+                Box::new(|ui| click(ui, LOCAL_PL_MORE.0, LOCAL_PL_MORE.1)),
+            ),
+        ),
+        (
+            // The same menu from the keyboard (Enter on "…"): its first
+            // line takes the focus, Tab moves on.
+            "playlist-menu-keyboard",
+            (
+                200,
+                Box::new(|ui| {
+                    close_menu(ui);
+                    let tm = ui.window.global::<crate::TrackMenu>();
+                    tm.set_album_id(ui.app().get_pl_card());
+                    tm.set_album_plugin(false);
+                    tm.set_x(LOCAL_PL_MORE.0 - 16.0);
+                    tm.set_y(LOCAL_PL_MORE.1 + 16.0);
+                    tm.set_keyboard(true);
+                    tm.set_album_serial(tm.get_album_serial() + 1);
+                    let ui = ui.clone();
+                    slint::Timer::single_shot(Duration::from_millis(200), move || {
+                        type_text(&ui, "\t\t")
+                    });
+                }),
+            ),
+        ),
+        (
             "settings",
             (
                 1200,
                 Box::new(|ui| {
+                    close_menu(ui);
                     // Tours never open real hardware: show example
                     // capabilities on the first hw: device.
                     let hw = ricercar_audio::device::list_devices()
@@ -652,10 +683,14 @@ fn close_menu(ui: &Ui) {
     click(ui, 1200.0, 200.0);
 }
 
-/// Where the rename and delete buttons of a plugin playlist's header sit
-/// (window coordinates, the page scrolled to the top).
-const PL_RENAME: (f32, f32) = (511.0, 167.0);
-const PL_DELETE: (f32, f32) = (557.0, 167.0);
+/// Where the "…" button of a local playlist's header and of a plugin
+/// playlist's sit (window coordinates, the page scrolled to the top)…
+const LOCAL_PL_MORE: (f32, f32) = (551.0, 314.0);
+const PL_MORE: (f32, f32) = (551.0, 167.0);
+/// …and the "Rename" and "Delete playlist" lines of the plugin playlist's
+/// menu, opened from it.
+const PL_RENAME: (f32, f32) = (635.0, 452.0);
+const PL_DELETE: (f32, f32) = (635.0, 486.0);
 
 /// A click of the left button at window coordinates.
 fn click(ui: &Ui, x: f32, y: f32) {
@@ -1019,10 +1054,18 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            // The playlist's own menu: the album entries, rename and delete.
+            "plugin-playlist-header-menu",
+            (200, Box::new(|ui| click(ui, PL_MORE.0, PL_MORE.1))),
+        ),
+        (
             "plugin-playlist-menu",
             (
                 200,
-                Box::new(|ui| open_track_menu(ui, "browse", 1, 700.0, 300.0)),
+                Box::new(|ui| {
+                    close_menu(ui);
+                    open_track_menu(ui, "browse", 1, 700.0, 300.0)
+                }),
             ),
         ),
         (
@@ -1087,19 +1130,31 @@ fn plugins_tour(dir: std::path::PathBuf) {
             (
                 200,
                 Box::new(|ui| {
-                    click(ui, PL_RENAME.0, PL_RENAME.1);
+                    click(ui, PL_MORE.0, PL_MORE.1);
                     let ui = ui.clone();
                     slint::Timer::single_shot(Duration::from_millis(200), move || {
-                        let enter = char::from(slint::platform::Key::Return);
-                        let end = char::from(slint::platform::Key::End);
-                        type_text(&ui, &format!("{end} 2{enter}"));
+                        click(&ui, PL_RENAME.0, PL_RENAME.1);
+                        slint::Timer::single_shot(Duration::from_millis(200), move || {
+                            let enter = char::from(slint::platform::Key::Return);
+                            let end = char::from(slint::platform::Key::End);
+                            type_text(&ui, &format!("{end} 2{enter}"));
+                        });
                     });
                 }),
             ),
         ),
         (
             "plugin-playlist-delete",
-            (200, Box::new(|ui| click(ui, PL_DELETE.0, PL_DELETE.1))),
+            (
+                200,
+                Box::new(|ui| {
+                    click(ui, PL_MORE.0, PL_MORE.1);
+                    let ui = ui.clone();
+                    slint::Timer::single_shot(Duration::from_millis(200), move || {
+                        click(&ui, PL_DELETE.0, PL_DELETE.1)
+                    });
+                }),
+            ),
         ),
         (
             "plugin-playlist-deleted",
@@ -1122,10 +1177,25 @@ fn plugins_tour(dir: std::path::PathBuf) {
             ),
         ),
         (
+            // Its header's "Add to queue": every track, read from the plugin.
+            "plugin-playlist-queued",
+            (
+                200,
+                Box::new(|ui| {
+                    let app = ui.app();
+                    app.invoke_album_action(app.get_br_menu_id(), "queue".into());
+                    app.set_queue_open(true);
+                }),
+            ),
+        ),
+        (
             "plugin-artist-details",
             (
                 600,
-                Box::new(|ui| ui.navigate(Page::Artist, "Demo Ensemble", true)),
+                Box::new(|ui| {
+                    ui.app().set_queue_open(false);
+                    ui.navigate(Page::Artist, "Demo Ensemble", true)
+                }),
             ),
         ),
         (
@@ -1133,10 +1203,25 @@ fn plugins_tour(dir: std::path::PathBuf) {
             (200, Box::new(|ui| scroll_page(ui, 560.0))),
         ),
         (
+            // An artist known only from the plugin: its header's "Add to
+            // queue" gathers the tracks of its plugin albums.
+            "plugin-artist-queued",
+            (
+                200,
+                Box::new(|ui| {
+                    scroll_page(ui, -560.0);
+                    let app = ui.app();
+                    app.invoke_album_action(app.get_ar_name(), "artist-queue".into());
+                    app.set_queue_open(true);
+                }),
+            ),
+        ),
+        (
             "plugin-album-details",
             (
                 1200,
                 Box::new(move |ui| {
+                    ui.app().set_queue_open(false);
                     let id = format!(
                         "{}{}",
                         crate::plugins::ALBUM_CARD,

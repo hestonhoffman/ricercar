@@ -2,7 +2,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, QueueRow, MenuEntry, ItemAction, Page } from "state.slint";
-import { Icon, IconButton, Button, Cover, Segmented, TextField, NowBars, Badge } from "widgets.slint";
+import { Icon, IconButton, Button, Cover, Segmented, TextField, NowBars, Badge, FocusRing } from "widgets.slint";
 import { TrackMenu } from "lists.slint";
 
 // ------------------------------------------------------------------ queue
@@ -502,10 +502,19 @@ component MenuLine inherits Rectangle {
     in property <image> icon;
     in property <bool> danger;
     in property <bool> submenu;
+    // takes the focus when shown (a menu opened from the keyboard)
+    in property <bool> autofocus;
     callback clicked();
     height: 34px;
     border-radius: Theme.r-sm;
-    background: ta.has-hover ? Theme.hover : transparent;
+    background: ta.has-hover || fs.has-focus ? Theme.hover : transparent;
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { clicked(); }
+    init => {
+        if autofocus { fs.focus(); }
+    }
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
@@ -514,9 +523,23 @@ component MenuLine inherits Rectangle {
         Text { text: root.text; font-size: Theme.fs-base; color: danger ? Theme.bad : Theme.text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
         if submenu: Icon { y: (parent.height - self.height) / 2; source: Icons.chevron-right; size: 14px; tint: Theme.text3; }
     }
+    // Tab moves between the lines, Space or Enter picks one.
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+    if fs.has-focus: FocusRing {
+        border-radius: root.border-radius;
     }
 }
 
@@ -530,15 +553,30 @@ component ItemActionLine inherits Rectangle {
     callback run(bool /* append */);
     height: 34px;
     border-radius: Theme.r-sm;
-    background: enabled && ta.has-hover ? Theme.hover : transparent;
+    background: enabled && (ta.has-hover || fs.has-focus) ? Theme.hover : transparent;
     accessible-role: button;
     accessible-label: action.label;
     accessible-enabled: enabled;
     accessible-action-default => { if enabled { run(false); } }
+    forward-focus: fs;
+    fs := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.run(false);
+                return accept;
+            }
+            reject
+        }
+    }
     ta := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.run(false); }
+    }
+    if fs.has-focus: FocusRing {
+        border-radius: root.border-radius;
     }
     HorizontalLayout {
         padding-left: 10px;
@@ -602,10 +640,15 @@ component ItemActions inherits VerticalLayout {
 /// Context menu for tracks and albums, drawn as an overlay (window coords).
 export component ContextMenu inherits Rectangle {
     in property <bool> is-album;
+    // opened from the keyboard: the first line takes the focus
+    in property <bool> keyboard;
     in property <length> win-w;
     in property <length> win-h;
     callback dismiss();
     callback new-playlist-for(bool);
+    // the playlist whose page is open (App.menu-edit)
+    callback rename-list();
+    callback delete-list();
     private property <bool> playlists-mode;
     private property <length> menu-w: 236px;
     // Items from a plugin: no folder; their album and artist open when the
@@ -614,6 +657,12 @@ export component ContextMenu inherits Rectangle {
     // an entry of the queue (TrackMenu.index is its id)
     private property <bool> queue-entry: !is-album && TrackMenu.list == "queue";
     private property <bool> can-radio: plugin-list && App.can-radio(is-album, TrackMenu.list, TrackMenu.index, TrackMenu.album-id);
+    // a local playlist: no artist, heart or folder, but export
+    private property <bool> local-playlist: is-album && App.menu-local-playlist;
+    private property <bool> show-artist: (!plugin-list && !local-playlist) || App.menu-artist-nav;
+    private property <bool> show-fav: !is-album || App.menu-fav;
+    private property <bool> show-folder: !plugin-list && !local-playlist;
+    private property <bool> show-edit: is-album && App.menu-edit;
     TouchArea {
         clicked => { root.dismiss(); }
         pointer-event(e) => {
@@ -643,7 +692,7 @@ export component ContextMenu inherits Rectangle {
                 ItemActions { done => { root.close(); } }
             }
             if !playlists-mode && !queue-entry: VerticalLayout {
-                MenuLine { text: @tr("Play"); icon: Icons.play; clicked => { act("play"); } }
+                MenuLine { text: @tr("Play"); icon: Icons.play; autofocus: root.keyboard; clicked => { act("play"); } }
                 if is-album: MenuLine { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { act("shuffle"); } }
                 MenuLine { text: @tr("Play next"); icon: Icons.list-plus; clicked => { act("next"); } }
                 MenuLine { text: @tr("Add to queue"); icon: Icons.list-end; clicked => { act("queue"); } }
@@ -656,23 +705,43 @@ export component ContextMenu inherits Rectangle {
                         root.playlists-mode = true;
                     }
                 }
-                // Plugin tracks, albums and artists whose plugin offers a radio.
+                // Plugin tracks, albums, playlists and artists whose plugin
+                // offers a radio.
                 if can-radio: MenuLine { text: @tr("Start radio"); icon: Icons.radio; clicked => { act("radio"); } }
-                Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+                if !is-album || show-artist || show-fav || show-folder || local-playlist || show-edit: Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
                 if !is-album && (!plugin-list || App.menu-album-nav): MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
-                if !plugin-list || App.menu-artist-nav: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
-                MenuLine { text: @tr("Favorite / unfavorite"); icon: Icons.heart; clicked => { act("fav"); } }
-                if !plugin-list: MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
+                if show-artist: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
+                if show-fav: MenuLine { text: @tr("Favorite / unfavorite"); icon: Icons.heart; clicked => { act("fav"); } }
+                if show-folder: MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
                 if !is-album && TrackMenu.list == "playlist": MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
                 // A plugin playlist the user owns: its entries are edited on the service.
                 if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && TrackMenu.index > 0: MenuLine { text: @tr("Move up"); icon: Icons.chevron-up; clicked => { act("pl-up"); } }
                 if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && (TrackMenu.index < App.br-tracks.length - 1 || App.br-more): MenuLine { text: @tr("Move down"); icon: Icons.chevron-down; clicked => { act("pl-down"); } }
                 if !is-album && TrackMenu.list == "browse" && App.br-editable: MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
+                // The playlist itself (its page's menu).
+                if local-playlist: MenuLine { text: @tr("Export as M3U"); icon: Icons.upload; clicked => { act("export"); } }
+                if show-edit: MenuLine {
+                    text: @tr("Rename");
+                    icon: Icons.pencil;
+                    clicked => {
+                        root.close();
+                        root.rename-list();
+                    }
+                }
+                if show-edit: MenuLine {
+                    text: @tr("Delete playlist");
+                    icon: Icons.trash;
+                    danger: true;
+                    clicked => {
+                        root.close();
+                        root.delete-list();
+                    }
+                }
                 // Keep last: the plugin's actions come after the host's.
                 ItemActions { done => { root.close(); } }
             }
             if playlists-mode: VerticalLayout {
-                MenuLine { text: @tr("Back"); icon: Icons.chevron-left; clicked => { root.playlists-mode = false; } }
+                MenuLine { text: @tr("Back"); icon: Icons.chevron-left; autofocus: root.keyboard; clicked => { root.playlists-mode = false; } }
                 Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
                 MenuLine { text: @tr("New playlist…"); icon: Icons.plus; clicked => { root.playlists-mode = false; root.new-playlist-for(root.is-album); } }
                 // Local playlists, then the editable ones of the plugin the

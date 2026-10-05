@@ -923,6 +923,18 @@ msgid "Move down"
 msgstr "Nach unten"
 
 msgctxt "ContextMenu"
+msgid "Export as M3U"
+msgstr "Als M3U exportieren"
+
+msgctxt "ContextMenu"
+msgid "Rename"
+msgstr "Umbenennen"
+
+msgctxt "ContextMenu"
+msgid "Delete playlist"
+msgstr "Playlist löschen"
+
+msgctxt "ContextMenu"
 msgid "Back"
 msgstr "Zurück"
 
@@ -945,6 +957,10 @@ msgstr "Zurück"
 msgctxt "TopBar"
 msgid "Forward"
 msgstr "Vorwärts"
+
+msgctxt "ActionBar"
+msgid "Loading…"
+msgstr "Wird geladen…"
 
 msgctxt "ActionBar"
 msgid "Pause"
@@ -1163,10 +1179,6 @@ msgstr[0] "{n} Titel"
 msgstr[1] "{n} Titel"
 
 msgctxt "ArtistPage"
-msgid "Favorite"
-msgstr "Favorit"
-
-msgctxt "ArtistPage"
 msgid "Starting radio…"
 msgstr "Radio wird gestartet…"
 
@@ -1267,26 +1279,6 @@ msgstr[0] "{n} Titel"
 msgstr[1] "{n} Titel"
 
 msgctxt "PlaylistPage"
-msgid "Play"
-msgstr "Abspielen"
-
-msgctxt "PlaylistPage"
-msgid "Shuffle"
-msgstr "Zufällig"
-
-msgctxt "PlaylistPage"
-msgid "Rename"
-msgstr "Umbenennen"
-
-msgctxt "PlaylistPage"
-msgid "Export as M3U"
-msgstr "Als M3U exportieren"
-
-msgctxt "PlaylistPage"
-msgid "Delete playlist"
-msgstr "Playlist löschen"
-
-msgctxt "PlaylistPage"
 msgid "This playlist is empty"
 msgstr "Diese Playlist ist leer"
 
@@ -1343,26 +1335,6 @@ msgstr[1] "{n} Alben"
 msgctxt "SearchPage"
 msgid "Nothing of this kind matches."
 msgstr "Nichts dieser Art gefunden."
-
-msgctxt "BrowsePage"
-msgid "Play"
-msgstr "Abspielen"
-
-msgctxt "BrowsePage"
-msgid "Shuffle"
-msgstr "Zufällig"
-
-msgctxt "BrowsePage"
-msgid "Rename"
-msgstr "Umbenennen"
-
-msgctxt "BrowsePage"
-msgid "Delete playlist"
-msgstr "Playlist löschen"
-
-msgctxt "BrowsePage"
-msgid "More"
-msgstr "Mehr"
 
 msgctxt "SignInDialog"
 msgid "Asking the plugin for a sign-in address…"
