@@ -58,15 +58,15 @@ component DeviceCaps inherits VerticalLayout {
         Segmented {
             label: @tr("DSD output");
             options: dev.dsd-native
-                ? [@tr("Convert to PCM"), @tr("DoP"), @tr("Native")]
-                : [@tr("Convert to PCM"), @tr("DoP")];
+                ? [@tr("Convert to PCM"), @tr("DoP (experimental)"), @tr("Native (experimental)")]
+                : [@tr("Convert to PCM"), @tr("DoP (experimental)")];
             selected: dev.dsd-choice;
             changed(i) => { App.set-device-dsd(dev.name, i); }
         }
         Rectangle { horizontal-stretch: 1; }
     }
     Text {
-        text: @tr("Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.");
+        text: @tr("Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume; both are experimental, not yet tested on DSD hardware. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.");
         font-size: Theme.fs-sm;
         color: Theme.text2;
         wrap: word-wrap;

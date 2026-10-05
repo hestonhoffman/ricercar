@@ -442,9 +442,6 @@
 "DSD": "DSD",
 "DSD output": "Uscita DSD",
 "Convert to PCM": "Converti in PCM",
-"DoP": "DoP",
-"Native": "Nativo",
-"Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.": "«Converti in PCM» riproduce i file DSD ovunque, non bit-perfect. DoP e nativo inviano i bit DSD intatti, a volume fisso. Scegli DoP solo se il tuo DAC lo supporta: un DAC senza DSD lo riproduce come un forte rumore.",
 "DSD: DoP": "DSD: DoP",
 "DSD: NATIVE": "DSD: NATIVO",
 "DoP {rate} kHz / 24-bit → DAC": "DoP {rate} kHz / 24 bit → DAC",
@@ -474,5 +471,8 @@
 "Could not use this link": "Impossibile usare questo link",
 "Index added": "Indice aggiunto",
 "Could not install the plugin": "Impossibile installare il plugin",
-"Could not read {url}": "Impossibile leggere {url}"
+"Could not read {url}": "Impossibile leggere {url}",
+"Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume; both are experimental, not yet tested on DSD hardware. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise.": "«Converti in PCM» riproduce i file DSD ovunque, non bit-perfect. DoP e nativo inviano i bit DSD intatti, a volume fisso. Scegli DoP solo se il tuo DAC lo supporta: un DAC senza DSD lo riproduce come un forte rumore. Entrambe le modalità sono sperimentali e non ancora provate su hardware DSD.",
+"DoP (experimental)": "DoP (sperimentale)",
+"Native (experimental)": "Nativo (sperimentale)"
 }

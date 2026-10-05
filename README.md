@@ -69,8 +69,9 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   albums of your library it cannot play natively
 - Gapless, sample-exact within a rate
 - FLAC · ALAC · WAV · AIFF · AAC · MP3 · Ogg Vorbis
-- DSD files (DSF, DFF, DST-compressed DFF; DSD64 and up, stereo): DoP or
-  native DSD to a `hw:` DAC, bit-perfect, or converted to 24-bit PCM
+- DSD files (DSF, DFF, DST-compressed DFF; DSD64 and up, stereo):
+  converted to 24-bit PCM, or DoP / native DSD to a `hw:` DAC, bit-perfect
+  (experimental: not yet tested on DSD hardware)
 - SACD images (ISO, stereo area, plain or DST): played straight from the
   image the same three ways, gapless from track to track
 - Hardware pause, device hot-switch, clean stop on unplug
@@ -400,8 +401,10 @@ output (open a `hw:` device's capabilities):
   when the last capability check of the device listed them.
 
 > [!WARNING]
-> Pick DoP only for a DAC that supports it. A DAC without DSD support plays
-> DoP as **loud noise**: keep the volume down the first time.
+> DoP and native DSD are **experimental**: they have not been tested on a
+> DSD-capable DAC yet (reports welcome). Pick DoP only for a DAC that
+> supports it. A DAC without DSD support plays DoP as **loud noise**: keep
+> the volume down the first time.
 
 DoP and native are only ever sent to a `hw:` device; PipeWire, `default`
 and plug devices always get converted PCM. While a DoP or native track

@@ -334,16 +334,16 @@ msgid "Convert to PCM"
 msgstr "PCM に変換"
 
 msgctxt "DeviceCaps"
-msgid "DoP"
-msgstr "DoP"
+msgid "DoP (experimental)"
+msgstr "DoP（試験的）"
 
 msgctxt "DeviceCaps"
-msgid "Native"
-msgstr "ネイティブ"
+msgid "Native (experimental)"
+msgstr "ネイティブ（試験的）"
 
 msgctxt "DeviceCaps"
-msgid "Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise."
-msgstr "「PCM に変換」はどこでも DSD ファイルを再生できますが、ビットパーフェクトではありません。DoP とネイティブは DSD のビットをそのまま固定音量で送ります。DoP は DAC が対応している場合のみ選んでください。DSD 非対応の DAC では大きなノイズになります。"
+msgid "Convert to PCM plays DSD files anywhere, not bit-perfect. DoP and native send the DSD bits untouched, at fixed volume; both are experimental, not yet tested on DSD hardware. Pick DoP only if your DAC supports it: a DAC without DSD support plays it as loud noise."
+msgstr "「PCM に変換」はどこでも DSD ファイルを再生できますが、ビットパーフェクトではありません。DoP とネイティブは DSD のビットをそのまま固定音量で送ります。DoP は DAC が対応している場合のみ選んでください。DSD 非対応の DAC では大きなノイズになります。 どちらも試験的な機能で、DSD 対応機器ではまだ検証していません。"
 
 msgctxt "StationLine"
 msgid "Favorite"
