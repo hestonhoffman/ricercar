@@ -352,6 +352,9 @@ export component Sidebar inherits Rectangle {
 
 /// Signal path popover content: source → decoder → container → device.
 export component ChainPanel inherits Rectangle {
+    // Wrapped text only counts its lines when it has a fixed width, so the
+    // panel's width is fixed and its texts are given theirs from it.
+    private property <length> inner: 330px - 32px;
     width: 330px;
     height: lay.preferred-height;
     border-radius: Theme.r-lg;
@@ -404,10 +407,12 @@ export component ChainPanel inherits Rectangle {
             VerticalLayout {
                 spacing: 1px;
                 Text { text: hop.label; font-size: Theme.fs-xs; color: Theme.text3; }
-                Text { text: hop.value; font-size: Theme.fs-base; color: Theme.text; wrap: word-wrap; }
+                Text { width: root.inner - 24px; text: hop.value; font-size: Theme.fs-base; color: Theme.text; wrap: word-wrap; }
             }
         }
-        Text {
+        // No verdict while the chain is not known yet (nothing playing).
+        if App.chain-known: Text {
+            width: root.inner;
             text: App.fixed-volume
                 ? (App.bitperfect ? @tr("Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing. Volume fixed at 100 %: use your amplifier's volume.") : @tr("Something in the chain changes the samples (ReplayGain or a mixing device). Volume is fixed at 100 %; turn ReplayGain off and use a hw: device for bit-perfect playback."))
                 : (App.bitperfect ? @tr("Samples reach the device untouched: native rate, no resampling, no mixer, no volume processing.") : @tr("Something in the chain changes the samples (volume, ReplayGain, mute or a mixing device). Set volume to 100 % and use a hw: device for bit-perfect playback."));
