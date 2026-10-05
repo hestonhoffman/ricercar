@@ -264,8 +264,12 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        write_atomic(path, &self.to_bytes()?)
+    }
+
+    pub fn to_bytes(&self) -> std::io::Result<Vec<u8>> {
         let text = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
-        write_atomic(path, text.as_bytes())
+        Ok(text.into_bytes())
     }
 }
 
@@ -297,7 +301,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// Same, without the syncs: for caches that can be rebuilt.
-pub(crate) fn write_cache(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_cache(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     write_private(path, bytes, false)
 }
 

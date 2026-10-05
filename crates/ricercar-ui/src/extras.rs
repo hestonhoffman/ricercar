@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use ricercar_core::config::{ReplayGain, Theme as ThemeCfg};
+use ricercar_core::writer::Durability;
 use ricercar_core::{PlayContext, TrackInfo};
 use ricercar_online::radio::{RadioBrowser, Station, StationQuery};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
@@ -317,10 +318,11 @@ fn play_station(ui: &Rc<Ui>, s: &Station) {
     });
 }
 
+/// radio.json holds the user's picks: durable, written off the UI thread.
 fn save_favs(ui: &Ui) {
     let favs = ui.extras.borrow().favs.clone();
     if let Ok(json) = serde_json::to_vec_pretty(&favs) {
-        let _ = ricercar_core::config::write_atomic(&favs_path(), &json);
+        ui.ctx.io.submit(&favs_path(), json, Durability::Durable);
     }
 }
 
@@ -705,10 +707,8 @@ pub fn store_caps(ui: &Ui, name: &str, caps: crate::dac::CachedCaps) {
         .insert(name.to_string(), caps);
     crate::plugins::push_output(ui);
     let st = ui.saved_state.borrow().clone();
-    if std::env::var_os("RICERCAR_SNAPSHOT").is_none()
-        && let Err(e) = st.save(&crate::ui_state::default_path())
-    {
-        tracing::warn!("save ui-state.json: {e}");
+    if std::env::var_os("RICERCAR_SNAPSHOT").is_none() {
+        crate::app::queue_state_save(ui, &st);
     }
 }
 
