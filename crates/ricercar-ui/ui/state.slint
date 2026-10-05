@@ -323,6 +323,12 @@ export global App {
     in property <[ItemAction]> menu-actions;
     in property <bool> menu-album-nav;
     in property <bool> menu-artist-nav;
+    // An album menu (`menu-opened(true)`): it acts on a local playlist
+    // (export), offers "Favorite / unfavorite", and renames or deletes the
+    // playlist whose page is open.
+    in property <bool> menu-local-playlist;
+    in property <bool> menu-fav;
+    in property <bool> menu-edit;
     // run menu-actions[i]; true: add to the queue instead of replacing it
     callback item-action(int, bool);
     // the "play" action whose tracks are being read, -1 when none
@@ -408,6 +414,8 @@ export global App {
     in property <[AlbumCard]> ar-own;
     in property <[AlbumCard]> ar-appears;
     // Heart of a plugin artist whose favourite state is known.
+    // its tracks are being gathered (Play, Shuffle, Add to queue)
+    in property <bool> ar-busy;
     in property <bool> ar-fav-shown;
     in property <bool> ar-fav;
     callback ar-toggle-fav();
@@ -432,6 +440,8 @@ export global App {
     in property <[AlbumCard]> fav-albums;
     in property <[TrackRow]> fav-tracks;
     in property <int> pl-id;
+    // its card id: what the header's menu and queue button act on
+    in property <string> pl-card;
     in property <string> pl-name;
     in property <int> pl-count;
     in property <string> pl-duration;
@@ -617,9 +627,13 @@ export global App {
     in property <bool> br-more;
     in property <string> br-error;
     in property <bool> br-auth;
-    // card id of the item on the browse page when it has plugin actions
-    // (its menu button), else ""
+    // card id of the item on the browse page (what its header's menu and
+    // queue button act on), whether it has plugin actions, and its
+    // favourite state when the plugin gives one
     in property <string> br-menu-id;
+    in property <bool> br-actions;
+    in property <bool> br-fav-shown;
+    in property <bool> br-fav;
     callback br-load-more();
     callback br-sign-in();
     callback br-play(bool);

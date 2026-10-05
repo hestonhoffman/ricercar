@@ -1,6 +1,6 @@
 //! Favourite state of plugin items (`Item.favorite`, plugins declaring
-//! `favorites`): the hearts of plugin tracks, of the plugin album and
-//! artist pages and of the player bar. A click flips the heart at once,
+//! `favorites`): the hearts of plugin tracks, of the plugin album, artist
+//! and browse (playlist) pages and of the player bar. A click flips the heart at once,
 //! `favorites.set` runs on a worker thread, and a failure puts it back.
 //! Items without the field keep the old behaviour (no state shown).
 
@@ -18,6 +18,8 @@ thread_local! {
     /// URIs of the plugin album and artist whose page is open.
     static ALBUM: RefCell<Option<String>> = const { RefCell::new(None) };
     static ARTIST: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// URI of the plugin item on the browse page (a playlist…).
+    static BROWSE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Note the state the items of plugin `id` carry, when it declares
@@ -48,6 +50,17 @@ pub fn show_album(ui: &Ui, id: &str, reference: &str) {
     let uri = plugin_uri(id, reference);
     ui.app().set_al_fav(known(&uri).unwrap_or(false));
     ALBUM.set(Some(uri));
+}
+
+/// The browse page shows `id`/`reference`: its header gets a heart when
+/// the item's state is known.
+pub fn show_browse(ui: &Ui, id: &str, reference: &str) {
+    let uri = plugin_uri(id, reference);
+    let state = known(&uri);
+    let app = ui.app();
+    app.set_br_fav_shown(state.is_some());
+    app.set_br_fav(state.unwrap_or(false));
+    BROWSE.set(Some(uri));
 }
 
 /// Leave the album page (a local album): its heart is the library's again.
@@ -135,6 +148,10 @@ fn apply(ui: &Ui, uri: &str, on: bool) {
     }
     if ARTIST.with_borrow(|a| a.as_deref() == Some(uri)) {
         app.set_ar_fav(on);
+    }
+    if BROWSE.with_borrow(|a| a.as_deref() == Some(uri)) {
+        app.set_br_fav_shown(true);
+        app.set_br_fav(on);
     }
     if ui.ctx.ctl.lock().current_uri().as_deref() == Some(uri) {
         app.set_fav(on);

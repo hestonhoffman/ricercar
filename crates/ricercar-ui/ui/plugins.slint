@@ -6,16 +6,13 @@ import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App } from "state.slint";
 import { Button, IconButton, TextField, Toggle, Segmented, SectionTitle } from "widgets.slint";
-import { BrowseContent, TrackMenu } from "lists.slint";
-import { PageScroll } from "pages.slint";
+import { BrowseContent } from "lists.slint";
+import { PageScroll, ActionBar } from "pages.slint";
 
 /// A list from a plugin (sidebar section, album, playlist, folder).
 export component BrowsePage inherits PageScroll {
     title: App.br-title;
     fade-at: 40px;
-    // a playlist the user owns on the service
-    callback rename();
-    callback delete();
     VerticalLayout {
         padding-left: 32px;
         padding-right: 32px;
@@ -35,32 +32,21 @@ export component BrowsePage inherits PageScroll {
             color: Theme.text2;
             overflow: elide;
         }
-        if App.br-tracks.length > 0 || App.br-menu-id != "" || App.br-editable: HorizontalLayout {
-            spacing: 10px;
-            alignment: start;
+        // Its tracks, its heart and its menu (the plugin's actions; rename
+        // and delete for a playlist the user owns).
+        if App.br-tracks.length > 0 || App.br-actions || App.br-editable: ActionBar {
             padding-top: 8px;
             padding-bottom: 8px;
-            if App.br-tracks.length > 0: Button { text: @tr("Play"); icon: Icons.play-fill; primary: true; clicked => { App.br-play(false); } }
-            if App.br-tracks.length > 0: Button { text: @tr("Shuffle"); icon: Icons.shuffle; clicked => { App.br-play(true); } }
-            if App.br-tracks.length > 0 && App.br-editable: Rectangle { width: 6px; }
-            if App.br-editable: IconButton { size: 36px; icon-size: 18px; icon: Icons.pencil; tooltip: @tr("Rename"); clicked => { root.rename(); } }
-            if App.br-editable: IconButton { size: 36px; icon-size: 18px; icon: Icons.trash; tooltip: @tr("Delete playlist"); clicked => { root.delete(); } }
-            // the item's menu, with the plugin's actions
-            if App.br-menu-id != "": VerticalLayout {
-                alignment: center;
-                IconButton {
-                    icon: Icons.ellipsis;
-                    size: 36px;
-                    tooltip: @tr("More");
-                    clicked => {
-                        TrackMenu.album-id = App.br-menu-id;
-                        TrackMenu.album-plugin = true;
-                        TrackMenu.x = self.absolute-position.x;
-                        TrackMenu.y = self.absolute-position.y + self.height;
-                        TrackMenu.album-serial += 1;
-                    }
-                }
-            }
+            can-play: App.br-tracks.length > 0;
+            can-queue: App.br-tracks.length > 0;
+            fav-shown: App.br-fav-shown;
+            fav: App.br-fav;
+            menu-id: App.br-menu-id;
+            menu-plugin: true;
+            play => { App.br-play(false); }
+            shuffle => { App.br-play(true); }
+            toggle-fav => { App.album-action(App.br-menu-id, "fav"); }
+            queue => { App.album-action(App.br-menu-id, "queue"); }
         }
         BrowseContent {
             cards: App.br-cards;

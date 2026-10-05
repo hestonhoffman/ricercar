@@ -16,6 +16,8 @@ export global TrackMenu {
     // the track comes from a plugin (no album or artist page, no folder)
     in-out property <bool> track-plugin;
     in-out property <int> album-serial;
+    // opened from the keyboard: its first line takes the focus
+    in-out property <bool> keyboard;
 }
 
 export component TrackHeader inherits Rectangle {

@@ -32,6 +32,8 @@ export component MainWindow inherits Window {
     private property <int> pending-add; // 0 none, 1 track, 2 album
     private property <bool> menu-open;
     private property <bool> menu-album;
+    // the menu was opened from the keyboard (its header button)
+    private property <bool> menu-keyboard;
     private property <bool> chain-open;
     private property <length> chain-x;
     private property <bool> toast-shown;
@@ -43,11 +45,14 @@ export component MainWindow inherits Window {
     private property <bool> w-theme-dark: App.theme-dark;
     changed w-menu-serial => {
         menu-album = false;
+        menu-keyboard = false;
         App.menu-opened(false);
         menu-open = true;
     }
     changed w-album-serial => {
         menu-album = true;
+        menu-keyboard = TrackMenu.keyboard;
+        TrackMenu.keyboard = false;
         App.menu-opened(true);
         menu-open = true;
     }
@@ -62,6 +67,16 @@ export component MainWindow inherits Window {
     private property <bool> w-psettings: App.psettings-open;
     changed w-psettings => {
         if !w-psettings { keys.focus(); }
+    }
+
+    // A menu opened from the keyboard gives the focus back to the window
+    // (its lines are gone).
+    function close-menu() {
+        menu-open = false;
+        if menu-keyboard {
+            menu-keyboard = false;
+            keys.focus();
+        }
     }
 
     toast-timer := Timer {
@@ -124,7 +139,10 @@ export component MainWindow inherits Window {
                 return accept;
             }
             if e.text == Key.Escape {
-                if menu-open { menu-open = false; return accept; }
+                if menu-open {
+                    close-menu();
+                    return accept;
+                }
                 if chain-open { chain-open = false; return accept; }
                 if App.now-playing-open { App.now-playing-open = false; return accept; }
                 if App.queue-open { App.queue-open = false; return accept; }
@@ -159,23 +177,11 @@ export component MainWindow inherits Window {
                     if App.page == Page.genres: GenresPage { }
                     if App.page == Page.genre: GenrePage { }
                     if App.page == Page.favorites: FavoritesPage { }
-                    if App.page == Page.playlist: PlaylistPage {
-                        rename => {
-                            dialog-value = App.pl-name;
-                            dialog = 2;
-                        }
-                        delete => { dialog = 3; }
-                    }
+                    if App.page == Page.playlist: PlaylistPage { }
                     if App.page == Page.search: SearchPage { }
                     if App.page == Page.radio: RadioPage { }
                     if App.page == Page.settings: SettingsPage { }
-                    if App.page == Page.browse: BrowsePage {
-                        rename => {
-                            dialog-value = App.br-title;
-                            dialog = 4;
-                        }
-                        delete => { dialog = 5; }
-                    }
+                    if App.page == Page.browse: BrowsePage { }
                     if App.page == Page.plugins: PluginsPage { }
                 }
                 if App.queue-open && !App.now-playing-open: QueuePanel { }
@@ -206,11 +212,18 @@ export component MainWindow inherits Window {
 
         if menu-open: ContextMenu {
             is-album: menu-album;
+            keyboard: menu-keyboard;
             win-w: root.width;
             win-h: root.height;
-            dismiss => { menu-open = false; }
+            dismiss => { close-menu(); }
+            // The playlist of the open page: local, or a plugin's own.
+            rename-list => {
+                dialog-value = App.page == Page.browse ? App.br-title : App.pl-name;
+                dialog = App.page == Page.browse ? 4 : 2;
+            }
+            delete-list => { dialog = App.page == Page.browse ? 5 : 3; }
             new-playlist-for(album) => {
-                menu-open = false;
+                close-menu();
                 pending-add = album ? 2 : 1;
                 dialog-value = "";
                 dialog = 1;

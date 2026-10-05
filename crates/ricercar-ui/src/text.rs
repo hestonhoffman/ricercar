@@ -242,6 +242,17 @@ pub fn count(n: usize, one: &'static str, many: &'static str) -> String {
     format!("{n} {}", if n == 1 { t(one) } else { t(many) })
 }
 
+/// Toast of a collection queued (`next`: to play next): "Added to the
+/// queue · 12 tracks".
+pub fn queued(n: usize, next: bool) -> String {
+    let what = if next {
+        t("Will play next")
+    } else {
+        t("Added to the queue")
+    };
+    format!("{what} · {}", count(n, "track", "tracks"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +379,8 @@ mod tests {
 
     #[test]
     fn formats() {
+        assert_eq!(queued(12, false), "Added to the queue · 12 tracks");
+        assert_eq!(queued(1, true), "Will play next · 1 track");
         assert_eq!(mmss(61_000), "1:01");
         assert_eq!(mmss(3_725_000), "1:02:05");
         assert_eq!(long_duration(47 * 60_000), "47 min");
@@ -398,6 +411,7 @@ mod tests {
         with_language("fr", || {
             assert_eq!(t("Muted"), "Sourdine");
             assert_eq!(count(3, "track", "tracks"), "3 titres");
+            assert_eq!(queued(1, true), "Sera lu ensuite · 1 titre");
             assert_eq!(
                 unsupported_albums(1, 352_800),
                 "1 album à 352,8 kHz ne pourra pas être lu nativement sur ce DAC"
