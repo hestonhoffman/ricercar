@@ -180,6 +180,9 @@ pub struct AppContext {
     pub covers: Arc<CoverCache>,
     pub config: Arc<RwLock<Config>>,
     pub config_path: PathBuf,
+    /// No config file existed at startup (a fresh install, or `--config`
+    /// naming a missing file): the interface offers its setup assistant.
+    pub first_run: bool,
     /// Writes files off the calling thread (the UI thread, mostly).
     /// config.toml is durable, written there; ui-state.json too, as a cache.
     pub io: Arc<LatestWriter>,
@@ -332,7 +335,7 @@ pub fn init_logging() {
 pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::error::Error>> {
     init_logging();
     let config_path = args.config.clone().unwrap_or_else(Config::default_path);
-    let first_run = !config_path.exists();
+    let first_run = Config::first_run(&config_path);
     let mut cfg = Config::load(&config_path);
     if let Some(d) = &args.device {
         cfg.audio.device = d.clone();
@@ -458,6 +461,7 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         covers,
         config,
         config_path,
+        first_run,
         io,
         quit,
         watcher,

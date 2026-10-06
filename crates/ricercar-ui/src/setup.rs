@@ -1,6 +1,6 @@
 //! Audio setup: pick the interface language, an output, see what its DAC
 //! accepts, choose fixed volume. Shown once at the first start (`[ui]
-//! audio_setup_done`); Settings → Audio output opens it again, at the
+//! setup_done`); Settings → Audio output opens it again, at the
 //! language too. The language applies (and is saved) at once, like in the
 //! settings; nothing else is applied before the last step.
 //!
@@ -26,7 +26,7 @@ thread_local! {
 /// Open the assistant at startup? Not once finished or skipped, and not
 /// for users who already chose an output (upgrades, `--device`).
 pub fn should_show(cfg: &Config) -> bool {
-    !cfg.ui.audio_setup_done && matches!(cfg.audio.device.as_str(), "" | "default")
+    !cfg.ui.setup_done && matches!(cfg.audio.device.as_str(), "" | "default")
 }
 
 /// Listed outputs, and a PipeWire one chosen earlier; not the placeholder
@@ -143,8 +143,8 @@ fn close(ui: &Ui) {
 
 /// Later: nothing changes, and the assistant is not shown again.
 fn skip(ui: &Ui) {
-    if !ui.ctx.config.read().unwrap().ui.audio_setup_done {
-        ui.ctx.update_config(|c| c.ui.audio_setup_done = true);
+    if !ui.ctx.config.read().unwrap().ui.setup_done {
+        ui.ctx.update_config(|c| c.ui.setup_done = true);
     }
     close(ui);
 }
@@ -155,7 +155,7 @@ fn finish(ui: &Ui) {
     let choice = CHOICE.with(|c| c.borrow().clone());
     ui.ctx.update_config(|c| {
         c.audio.fixed_volume = fixed;
-        c.ui.audio_setup_done = true;
+        c.ui.setup_done = true;
     });
     ui.app().set_fixed_volume(fixed);
     if let Some(name) = choice.filter(|n| *n != ui.ctx.ctl.device_name()) {
@@ -196,7 +196,7 @@ mod tests {
     fn shown_once_to_new_users() {
         let mut c = Config::default();
         assert!(should_show(&c));
-        c.ui.audio_setup_done = true;
+        c.ui.setup_done = true;
         assert!(!should_show(&c));
     }
 
@@ -211,7 +211,7 @@ mod tests {
         assert!(should_show(&Config::load(&p)));
         // Skipped once: saved, and not shown again.
         let mut c = Config::load(&p);
-        c.ui.audio_setup_done = true;
+        c.ui.setup_done = true;
         c.save(&p).unwrap();
         assert!(!should_show(&Config::load(&p)));
     }

@@ -163,9 +163,10 @@ pub struct UiConfig {
     /// Interface language: "en", "fr", "de", "es", "it", "ja", or empty to
     /// follow the system.
     pub language: String,
-    /// The first-run audio setup was finished or skipped. Not needed when
-    /// an output other than `default` is configured.
-    pub audio_setup_done: bool,
+    /// The setup assistant was finished or skipped. It opens by itself
+    /// only on a first launch (no config file yet). Was `audio_setup_done`.
+    #[serde(alias = "audio_setup_done")]
+    pub setup_done: bool,
     /// Light up the words of lyrics that only time their lines, at an
     /// estimated pace (display only).
     pub estimate_word_timing: bool,
@@ -181,7 +182,7 @@ impl Default for UiConfig {
             tray: true,
             close_to_tray: false,
             language: String::new(),
-            audio_setup_done: false,
+            setup_done: false,
             estimate_word_timing: false,
         }
     }
@@ -302,6 +303,12 @@ impl Config {
         config_dir().join("config.toml")
     }
 
+    /// A first launch: no config file yet. Checked before anything writes
+    /// one; a `--config` file that does not exist counts too.
+    pub fn first_run(path: &Path) -> bool {
+        !path.exists()
+    }
+
     /// Missing file → defaults; unreadable file → defaults plus a warning
     /// (never refuse to start because of a typo in the config).
     pub fn load(path: &Path) -> Config {
@@ -330,7 +337,7 @@ impl Config {
 }
 
 /// `$XDG_MUSIC_DIR` from user-dirs.dirs, else `~/Music` when it exists.
-fn default_music_dir() -> Option<PathBuf> {
+pub fn default_music_dir() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
     let dirs = std::fs::read_to_string(
         std::env::var_os("XDG_CONFIG_HOME")
@@ -425,17 +432,31 @@ mod tests {
     }
 
     #[test]
-    fn audio_setup_flag() {
+    fn setup_flag() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("c.toml");
         // Files written before the setup existed: not done.
         std::fs::write(&p, "[ui]\ntheme = \"light\"\n").unwrap();
         let mut c = Config::load(&p);
-        assert!(!c.ui.audio_setup_done);
-        c.ui.audio_setup_done = true;
+        assert!(!c.ui.setup_done);
+        c.ui.setup_done = true;
         c.save(&p).unwrap();
-        assert!(text_of(&p).contains("audio_setup_done = true"));
+        assert!(text_of(&p).contains("setup_done = true"));
         assert_eq!(Config::load(&p), c);
+        // The 0.10 name still reads.
+        std::fs::write(&p, "[ui]\naudio_setup_done = true\n").unwrap();
+        assert!(Config::load(&p).ui.setup_done);
+    }
+
+    #[test]
+    fn first_run_is_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("sub").join("config.toml");
+        assert!(Config::first_run(&p));
+        // Even an empty file was written by someone: not a first launch.
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "").unwrap();
+        assert!(!Config::first_run(&p));
     }
 
     #[test]
