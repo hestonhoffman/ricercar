@@ -692,6 +692,14 @@ msgid "Tint the interface with the playing album's colours."
 msgstr "再生中のアルバムの色でインターフェイスを彩ります。"
 
 msgctxt "SettingsPage"
+msgid "Estimate word timing"
+msgstr "単語のタイミングを推定"
+
+msgctxt "SettingsPage"
+msgid "When lyrics only time lines, light up words at an estimated pace."
+msgstr "歌詞が行単位でしか同期していないとき、推定したペースで単語をハイライトします。"
+
+msgctxt "SettingsPage"
 msgid "Keep playing in the tray when the window is closed"
 msgstr "ウインドウを閉じてもトレイで再生を続ける"
 

@@ -380,6 +380,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
             .map_or(0, |i| i as i32 + 1),
     );
     app.set_adaptive_colors(cfg.ui.adaptive_colors);
+    app.set_estimate_word_timing(cfg.ui.estimate_word_timing);
     app.set_accent_choice(
         ACCENTS
             .iter()
@@ -791,6 +792,7 @@ fn settings_changed(ui: &Rc<Ui>) {
             ThemeCfg::Light
         };
         c.ui.adaptive_colors = app.get_adaptive_colors();
+        c.ui.estimate_word_timing = app.get_estimate_word_timing();
         c.ui.accent = accent.into();
         c.ui.language = match app.get_ui_language() {
             i @ 1.. => crate::text::LANGUAGES
@@ -811,6 +813,7 @@ fn settings_changed(ui: &Rc<Ui>) {
     ui.ctx.ctl.set_replaygain(rg, preamp);
     ui.loader.borrow().set_online(app.get_covers_online());
     apply_theme(ui);
+    crate::player::word_estimate_changed(ui);
 }
 
 // ------------------------------------------------------------------ scrobbling

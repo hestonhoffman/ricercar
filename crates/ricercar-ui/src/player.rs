@@ -28,8 +28,14 @@ pub struct PlayerView {
     /// Queue item id of the track shown in the bar.
     now_id: Option<u64>,
     now_title: Option<String>,
+    /// Lyrics as found.
+    found_lyrics: Vec<Line>,
+    /// Lyrics as shown: the found ones, with estimated words when the
+    /// setting is on.
     lyrics: Vec<Line>,
     synced: bool,
+    /// The word estimate setting `lyrics` was built with.
+    estimated: bool,
     lyric_index: i32,
     /// Word being sung in the current line, -1 when none (or no words).
     lyric_word: i32,
@@ -933,25 +939,53 @@ fn rebuild_queue(ui: &Rc<Ui>, st: &CtlState) {
 
 fn set_lyrics(ui: &Ui, lines: Vec<Line>, synced: bool, status: &str, source: &str) {
     let app = ui.app();
-    let rows: Vec<LyricLine> = lines
-        .iter()
-        .map(|l| LyricLine {
-            text: l.text.clone().into(),
-            ms: l.time_ms.min(i32::MAX as u64) as i32,
-            karaoke: synced && !l.words.is_empty(),
-        })
-        .collect();
-    app.set_lyrics(ModelRc::new(VecModel::from(rows)));
     app.set_lyrics_synced(synced);
     app.set_lyrics_status(status.into());
     app.set_lyrics_source(source.into());
+    {
+        let mut pv = ui.player.borrow_mut();
+        pv.found_lyrics = lines;
+        pv.synced = synced;
+    }
+    show_lyrics(ui);
+}
+
+/// Shows the found lyrics, with estimated words on synced lines that do
+/// not time theirs when the setting is on (never cached: display only).
+fn show_lyrics(ui: &Ui) {
+    let estimate = ui.ctx.config.read().unwrap().ui.estimate_word_timing;
+    let rows: Vec<LyricLine> = {
+        let mut pv = ui.player.borrow_mut();
+        pv.lyrics = if pv.synced && estimate {
+            ricercar_online::lyrics::with_estimated_words(&pv.found_lyrics)
+        } else {
+            pv.found_lyrics.clone()
+        };
+        pv.estimated = estimate;
+        pv.lyric_index = -1;
+        pv.lyric_word = -1;
+        pv.lyrics
+            .iter()
+            .map(|l| LyricLine {
+                text: l.text.clone().into(),
+                ms: l.time_ms.min(i32::MAX as u64) as i32,
+                karaoke: pv.synced && !l.words.is_empty(),
+            })
+            .collect()
+    };
+    let app = ui.app();
+    app.set_lyrics(ModelRc::new(VecModel::from(rows)));
     app.set_lyric_index(-1);
     app.set_lyric_sung(Default::default());
-    let mut pv = ui.player.borrow_mut();
-    pv.lyrics = lines;
-    pv.synced = synced;
-    pv.lyric_index = -1;
-    pv.lyric_word = -1;
+}
+
+/// After a settings change: the lyrics shown follow the word estimate
+/// setting at once.
+pub fn word_estimate_changed(ui: &Ui) {
+    let estimate = ui.ctx.config.read().unwrap().ui.estimate_word_timing;
+    if estimate != ui.player.borrow().estimated {
+        show_lyrics(ui);
+    }
 }
 
 fn plain_lines(text: &str) -> Vec<Line> {

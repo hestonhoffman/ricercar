@@ -661,6 +661,12 @@ export component SettingsPage inherits PageScroll {
             }
             Divider { }
             Row {
+                label: @tr("Estimate word timing");
+                hint: @tr("When lyrics only time lines, light up words at an estimated pace.");
+                Toggle { checked <=> App.estimate-word-timing; toggled => { App.settings-changed(); } }
+            }
+            Divider { }
+            Row {
                 label: @tr("Keep playing in the tray when the window is closed");
                 Toggle { checked <=> App.close-to-tray; toggled => { App.settings-changed(); } }
             }

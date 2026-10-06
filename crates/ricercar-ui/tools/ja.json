@@ -96,6 +96,8 @@
 "Accent colour": "アクセントカラー",
 "Colours from the album cover": "ジャケットの色を使う",
 "Tint the interface with the playing album's colours.": "再生中のアルバムの色でインターフェイスを彩ります。",
+"Estimate word timing": "単語のタイミングを推定",
+"When lyrics only time lines, light up words at an estimated pace.": "歌詞が行単位でしか同期していないとき、推定したペースで単語をハイライトします。",
 "Track change notifications": "曲の切り替え時に通知",
 "Keep playing in the tray when the window is closed": "ウインドウを閉じてもトレイで再生を続ける",
 "Keyboard": "キーボード",
