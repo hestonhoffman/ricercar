@@ -667,10 +667,6 @@ msgid "Language"
 msgstr "Langue"
 
 msgctxt "SettingsPage"
-msgid "System"
-msgstr "Système"
-
-msgctxt "SettingsPage"
 msgid "Theme"
 msgstr "Thème"
 
@@ -1579,8 +1575,12 @@ msgid "NOT CONNECTED"
 msgstr "NON CONNECTÉ"
 
 msgctxt "SetupAssistant"
-msgid "Audio setup · step {} of 4"
-msgstr "Configuration audio · étape {} sur 4"
+msgid "Audio setup · step {} of {}"
+msgstr "Configuration audio · étape {} sur {}"
+
+msgctxt "SetupAssistant"
+msgid "Language"
+msgstr "Langue"
 
 msgctxt "SetupAssistant"
 msgid "Choose the output"
@@ -1597,6 +1597,10 @@ msgstr "Volume"
 msgctxt "SetupAssistant"
 msgid "Ready"
 msgstr "Prêt"
+
+msgctxt "SetupAssistant"
+msgid "The interface switches at once. “System” follows the language of your desktop."
+msgstr "L'interface change aussitôt. « Système » suit la langue de votre bureau."
 
 msgctxt "SetupAssistant"
 msgid "Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample."
@@ -1662,13 +1666,17 @@ msgctxt "SetupAssistant"
 msgid "Save"
 msgstr "Enregistrer"
 
-msgctxt ""
+msgctxt "App"
 msgid "Everything"
 msgstr "Partout"
 
-msgctxt ""
+msgctxt "App"
 msgid "My library"
 msgstr "Ma bibliothèque"
+
+msgctxt "App"
+msgid "System"
+msgstr "Système"
 
 msgctxt "PlayButton"
 msgid "Pause"

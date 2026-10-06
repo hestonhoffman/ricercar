@@ -2,7 +2,7 @@
 """Regenerate lang/<code>/LC_MESSAGES/ricercar-ui.po from ui/*.slint and
 tools/<code>.json, for every language listed in LANGUAGES.
 
-Slint uses the enclosing component name as gettext context. The JSON files
+Slint uses the enclosing component (or global) name as gettext context. The JSON files
 also hold the Rust-side strings (text::t), which the .po files skip."""
 import glob, json, os, re, sys
 
@@ -19,7 +19,7 @@ LANGUAGES = {
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
 tr = re.compile(r'@tr\(\s*"((?:[^"\\]|\\.)*)"(?:\s*\|\s*"((?:[^"\\]|\\.)*)"\s*%)?')
-comp = re.compile(r'^\s*(?:export\s+)?component\s+([A-Za-z_][\w-]*)', re.M)
+comp = re.compile(r'^\s*(?:export\s+)?(?:component|global)\s+([A-Za-z_][\w-]*)', re.M)
 entries = {}
 for f in sorted(glob.glob(os.path.join(root, "ui", "*.slint"))):
     text = open(f, encoding="utf-8").read()

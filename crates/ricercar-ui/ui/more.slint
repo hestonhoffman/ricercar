@@ -615,9 +615,7 @@ export component SettingsPage inherits PageScroll {
                 label: @tr("Language");
                 Dropdown {
                     label: @tr("Language");
-                    // Language names stay in their own language
-                    // (same order as text::LANGUAGES).
-                    options: [@tr("System"), "English", "Français", "Deutsch", "Español", "Italiano", "日本語"];
+                    options: App.language-names;
                     selected <=> App.ui-language;
                     changed => { App.settings-changed(); }
                 }

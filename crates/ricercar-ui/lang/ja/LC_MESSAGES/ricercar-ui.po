@@ -664,10 +664,6 @@ msgid "Language"
 msgstr "言語"
 
 msgctxt "SettingsPage"
-msgid "System"
-msgstr "システム"
-
-msgctxt "SettingsPage"
 msgid "Theme"
 msgstr "テーマ"
 
@@ -1566,8 +1562,12 @@ msgid "NOT CONNECTED"
 msgstr "未接続"
 
 msgctxt "SetupAssistant"
-msgid "Audio setup · step {} of 4"
-msgstr "オーディオ設定ガイド · ステップ {}/4"
+msgid "Audio setup · step {} of {}"
+msgstr "オーディオ設定ガイド · ステップ {}/{}"
+
+msgctxt "SetupAssistant"
+msgid "Language"
+msgstr "言語"
 
 msgctxt "SetupAssistant"
 msgid "Choose the output"
@@ -1584,6 +1584,10 @@ msgstr "音量"
 msgctxt "SetupAssistant"
 msgid "Ready"
 msgstr "準備完了"
+
+msgctxt "SetupAssistant"
+msgid "The interface switches at once. “System” follows the language of your desktop."
+msgstr "表示言語はすぐに切り替わります。「システム」はデスクトップの言語に従います。"
 
 msgctxt "SetupAssistant"
 msgid "Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample."
@@ -1649,13 +1653,17 @@ msgctxt "SetupAssistant"
 msgid "Save"
 msgstr "保存"
 
-msgctxt ""
+msgctxt "App"
 msgid "Everything"
 msgstr "すべて"
 
-msgctxt ""
+msgctxt "App"
 msgid "My library"
 msgstr "マイライブラリ"
+
+msgctxt "App"
+msgid "System"
+msgstr "システム"
 
 msgctxt "PlayButton"
 msgid "Pause"

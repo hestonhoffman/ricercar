@@ -5,6 +5,39 @@ import { CapLine } from "more.slint";
 
 // ------------------------------------------------------------------ audio setup
 
+component SetupRadio inherits Rectangle {
+    in property <bool> checked;
+    width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    border-width: 2px;
+    border-color: checked ? Theme.accent : Theme.line-strong;
+    if checked: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
+}
+
+component SetupLanguage inherits Rectangle {
+    in property <string> name;
+    in property <bool> selected;
+    callback clicked();
+    height: 36px;
+    border-radius: Theme.r-md;
+    background: ta.has-hover || selected ? Theme.hover : transparent;
+    accessible-role: button;
+    accessible-label: name;
+    accessible-action-default => { root.clicked(); }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        SetupRadio { y: (parent.height - self.height) / 2; checked: selected; }
+        Text { text: name; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; vertical-alignment: center; overflow: elide; }
+    }
+}
+
 component SetupOutput inherits Rectangle {
     in property <DeviceRow> dev;
     height: 52px;
@@ -21,15 +54,7 @@ component SetupOutput inherits Rectangle {
         padding-left: 12px;
         padding-right: 12px;
         spacing: 12px;
-        Rectangle {
-            y: (parent.height - self.height) / 2;
-            width: 18px;
-            height: 18px;
-            border-radius: 9px;
-            border-width: 2px;
-            border-color: dev.selected ? Theme.accent : Theme.line-strong;
-            if dev.selected: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
-        }
+        SetupRadio { y: (parent.height - self.height) / 2; checked: dev.selected; }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
@@ -51,8 +76,9 @@ component SetupHeading inherits Text {
     vertical-alignment: bottom;
 }
 
-/// First-run audio setup (setup.rs): output, DAC, volume, summary. Nothing
-/// is applied before Save; Later (or Escape) closes it for good.
+/// First-run audio setup (setup.rs): language, output, DAC, volume,
+/// summary. The language applies at once; the rest at Save. Later (or
+/// Escape) closes it for good.
 export component SetupAssistant inherits Rectangle {
     // Wrapped text gets this width explicitly: its height then covers
     // every line.
@@ -82,22 +108,37 @@ export component SetupAssistant inherits Rectangle {
             lay := VerticalLayout {
                 padding: 24px;
                 spacing: 12px;
-                Text { text: @tr("Audio setup · step {} of 4", step + 1); font-size: Theme.fs-sm; color: Theme.text3; }
+                Text { text: @tr("Audio setup · step {} of {}", step + 1, 5); font-size: Theme.fs-sm; color: Theme.text3; }
                 Text {
-                    text: step == 0 ? @tr("Choose the output") : step == 1 ? @tr("Check the DAC") : step == 2 ? @tr("Volume") : @tr("Ready");
+                    text: step == 0 ? @tr("Language") : step == 1 ? @tr("Choose the output") : step == 2 ? @tr("Check the DAC") : step == 3 ? @tr("Volume") : @tr("Ready");
                     font-size: Theme.fs-xl;
                     font-weight: 700;
                     color: Theme.text;
                 }
 
                 if step == 0: Text {
+                    text: @tr("The interface switches at once. “System” follows the language of your desktop.");
+                    font-size: Theme.fs-md;
+                    color: Theme.text2;
+                    wrap: word-wrap;
+                    width: root.body-width;
+                }
+                if step == 0: VerticalLayout {
+                    for name[i] in App.language-names: SetupLanguage {
+                        name: name;
+                        selected: i == App.ui-language;
+                        clicked => { App.setup-language(i); }
+                    }
+                }
+
+                if step == 1: Text {
                     text: @tr("Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample.");
                     font-size: Theme.fs-md;
                     color: Theme.text2;
                     wrap: word-wrap;
                     width: root.body-width;
                 }
-                if step == 0: fl := Flickable {
+                if step == 1: fl := Flickable {
                     height: min(list.preferred-height, root.height - 320px);
                     content-height: list.preferred-height;
                     list := VerticalLayout {
@@ -110,7 +151,7 @@ export component SetupAssistant inherits Rectangle {
                     }
                 }
 
-                if step == 1: VerticalLayout {
+                if step == 2: VerticalLayout {
                     spacing: 10px;
                     Text { text: App.setup-dev.desc; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
                     if App.setup-dev.caps-status != "": Text { text: App.setup-dev.caps-status; font-size: Theme.fs-sm; color: Theme.text3; wrap: word-wrap; width: root.body-width; }
@@ -120,7 +161,7 @@ export component SetupAssistant inherits Rectangle {
                     if App.setup-note != "": Text { text: App.setup-note; font-size: Theme.fs-md; color: Theme.text2; wrap: word-wrap; width: root.body-width; }
                 }
 
-                if step == 2: VerticalLayout {
+                if step == 3: VerticalLayout {
                     spacing: 14px;
                     Text {
                         text: @tr("With fixed volume, ricercar always plays at 100 % and ignores volume changes, so the samples reach the DAC untouched. You then set the volume on your DAC or amplifier: turn it down before the first track.");
@@ -136,7 +177,7 @@ export component SetupAssistant inherits Rectangle {
                     }
                 }
 
-                if step == 3: VerticalLayout {
+                if step == 4: VerticalLayout {
                     spacing: 8px;
                     HorizontalLayout {
                         spacing: 12px;
@@ -163,13 +204,13 @@ export component SetupAssistant inherits Rectangle {
                     Button { text: @tr("Later"); clicked => { App.setup-skip(); } }
                     Rectangle { horizontal-stretch: 1; }
                     if step > 0: Button { text: @tr("Back"); clicked => { App.setup-step = step - 1; } }
-                    if step < 3: Button {
+                    if step < 4: Button {
                         text: @tr("Next");
                         primary: true;
-                        enabled: App.setup-dev.name != "";
+                        enabled: step != 1 || App.setup-dev.name != "";
                         clicked => { App.setup-step = step + 1; }
                     }
-                    if step == 3: Button { text: @tr("Save"); primary: true; clicked => { App.setup-finish(); } }
+                    if step == 4: Button { text: @tr("Save"); primary: true; clicked => { App.setup-finish(); } }
                 }
             }
         }
