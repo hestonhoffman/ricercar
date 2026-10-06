@@ -163,6 +163,9 @@ pub struct UiConfig {
     /// Interface language: "en", "fr", "de", "es", "it", "ja", or empty to
     /// follow the system.
     pub language: String,
+    /// The first-run audio setup was finished or skipped. Not needed when
+    /// an output other than `default` is configured.
+    pub audio_setup_done: bool,
 }
 
 impl Default for UiConfig {
@@ -175,6 +178,7 @@ impl Default for UiConfig {
             tray: true,
             close_to_tray: false,
             language: String::new(),
+            audio_setup_done: false,
         }
     }
 }
@@ -414,6 +418,20 @@ mod tests {
         assert_eq!(c.audio.device, "default");
         assert!(!c.audio.fixed_volume);
         assert_eq!(c.network.name, "ricercar");
+    }
+
+    #[test]
+    fn audio_setup_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        // Files written before the setup existed: not done.
+        std::fs::write(&p, "[ui]\ntheme = \"light\"\n").unwrap();
+        let mut c = Config::load(&p);
+        assert!(!c.ui.audio_setup_done);
+        c.ui.audio_setup_done = true;
+        c.save(&p).unwrap();
+        assert!(text_of(&p).contains("audio_setup_done = true"));
+        assert_eq!(Config::load(&p), c);
     }
 
     #[test]
