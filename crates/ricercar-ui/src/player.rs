@@ -929,6 +929,7 @@ fn plain_lines(text: &str) -> Vec<Line> {
         .map(|l| Line {
             time_ms: 0,
             text: l.trim().to_string(),
+            words: Vec::new(),
         })
         .collect()
 }

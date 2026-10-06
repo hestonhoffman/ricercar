@@ -94,7 +94,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - SACD images: an `.iso` shows as its album, one track per track of the
   stereo area, with the disc's text (titles, artists, year, genre)
 - Covers: embedded, folder images, or Cover Art Archive
-- Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net
+- Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net,
+  word by word when they time their words (enhanced LRC)
 
 </td>
 </tr>
