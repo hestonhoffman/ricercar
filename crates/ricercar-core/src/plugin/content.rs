@@ -9,6 +9,8 @@ use super::{Item, items_of};
 /// Most synced lines (and plain lines) kept.
 pub const MAX_LYRIC_LINES: usize = 5000;
 const MAX_LYRIC_LINE: usize = 500;
+/// Most timed words kept per synced line.
+const MAX_LYRIC_WORDS: usize = 500;
 const MAX_PLAIN: usize = 200_000;
 /// Longest biography kept, in characters.
 pub const MAX_BIOGRAPHY: usize = 20_000;
@@ -27,6 +29,50 @@ const MAX_FACT_VALUE: usize = 500;
 pub struct LyricLine {
     pub time_ms: u64,
     pub text: String,
+    /// Word timings, empty when the plugin gave none. Their texts joined
+    /// are `text`: the spaces between words are added to the word before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<LyricWord>,
+}
+
+/// One word (or syllable) of a [`LyricLine`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LyricWord {
+    pub time_ms: u64,
+    pub text: String,
+}
+
+/// The `words` of a synced line, as pieces of `text`. Words are looked up
+/// in order in the text, each taking the spaces after it (the first one,
+/// the text before it); `None` when one is malformed or not found. A time
+/// before the previous word's is moved up to it.
+fn words_of(v: Option<&Value>, text: &str) -> Option<Vec<LyricWord>> {
+    let raw = v?.as_array()?;
+    let mut found: Vec<(u64, usize)> = Vec::new();
+    let mut at = 0;
+    for w in raw.iter().take(MAX_LYRIC_WORDS) {
+        let time_ms = w.get("time_ms")?.as_u64()?;
+        let time_ms = found.last().map_or(time_ms, |&(t, _)| time_ms.max(t));
+        let word = clean(w.get("text")?.as_str()?, MAX_LYRIC_LINE, &[]);
+        let word = word.trim();
+        if word.is_empty() {
+            continue;
+        }
+        let start = at + text[at..].find(word)?;
+        found.push((time_ms, if found.is_empty() { 0 } else { start }));
+        at = start + word.len();
+    }
+    // Each word runs to the next one's start, the last to the end.
+    let ends = found.iter().skip(1).map(|&(_, s)| s).chain([text.len()]);
+    let words: Vec<LyricWord> = found
+        .iter()
+        .zip(ends)
+        .map(|(&(time_ms, start), end)| LyricWord {
+            time_ms,
+            text: text[start..end].to_string(),
+        })
+        .collect();
+    (!words.is_empty()).then_some(words)
 }
 
 /// Answer to `lyrics.get`.
@@ -61,11 +107,13 @@ impl PluginLyrics {
             .map(|a| {
                 a.iter()
                     .filter_map(|l| {
+                        let text = clean(l.get("text")?.as_str()?, MAX_LYRIC_LINE, &[])
+                            .trim()
+                            .to_string();
                         Some(LyricLine {
                             time_ms: l.get("time_ms")?.as_u64()?,
-                            text: clean(l.get("text")?.as_str()?, MAX_LYRIC_LINE, &[])
-                                .trim()
-                                .to_string(),
+                            words: words_of(l.get("words"), &text).unwrap_or_default(),
+                            text,
                         })
                     })
                     .take(MAX_LYRIC_LINES)
@@ -219,6 +267,80 @@ mod tests {
                 .unwrap()
                 .instrumental
         );
+    }
+
+    fn words(l: &LyricLine) -> Vec<(u64, &str)> {
+        l.words
+            .iter()
+            .map(|w| (w.time_ms, w.text.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn lyric_words() {
+        let l = PluginLyrics::parse(&json!({
+            "synced": [
+                // Without spaces: they go to the word before.
+                {"time_ms": 1000, "text": "Some words here", "words": [
+                    {"time_ms": 1000, "text": "Some"},
+                    {"time_ms": 1400, "text": "words"},
+                    {"time_ms": 1900, "text": "here"}
+                ]},
+                // With them, and text before the first word.
+                {"time_ms": 3000, "text": "(oh) beautiful!", "words": [
+                    {"time_ms": 3100, "text": "beau"},
+                    {"time_ms": 3200, "text": "ti"},
+                    {"time_ms": 3150, "text": "ful "}
+                ]},
+                {"time_ms": 2000, "text": "no words"},
+                {"time_ms": 4000, "text": "not found", "words": [{"time_ms": 4000, "text": "lost"}]},
+                {"time_ms": 5000, "text": "bad", "words": [{"time_ms": "x", "text": "bad"}]},
+                {"time_ms": 6000, "text": "odd", "words": "odd"}
+            ]
+        }))
+        .unwrap();
+        let s = l.synced.unwrap();
+        assert_eq!(
+            words(&s[0]),
+            [(1000, "Some "), (1400, "words "), (1900, "here")]
+        );
+        assert_eq!(s[1].text, "no words");
+        assert!(s[1].words.is_empty());
+        assert_eq!(
+            words(&s[2]),
+            [(3100, "(oh) beau"), (3200, "ti"), (3200, "ful!")]
+        );
+        for l in &s[3..] {
+            assert!(l.words.is_empty(), "{}", l.text);
+        }
+        for l in &s {
+            if !l.words.is_empty() {
+                let joined: String = l.words.iter().map(|w| w.text.as_str()).collect();
+                assert_eq!(joined, l.text);
+            }
+        }
+    }
+
+    #[test]
+    fn lyric_words_serde() {
+        // Lines without words serialise as before.
+        let l = LyricLine {
+            time_ms: 5,
+            text: "a".into(),
+            words: Vec::new(),
+        };
+        let json = serde_json::to_string(&l).unwrap();
+        assert_eq!(json, r#"{"time_ms":5,"text":"a"}"#);
+        assert_eq!(serde_json::from_str::<LyricLine>(&json).unwrap(), l);
+        let l = LyricLine {
+            words: vec![LyricWord {
+                time_ms: 5,
+                text: "a".into(),
+            }],
+            ..l
+        };
+        let json = serde_json::to_string(&l).unwrap();
+        assert_eq!(serde_json::from_str::<LyricLine>(&json).unwrap(), l);
     }
 
     #[test]

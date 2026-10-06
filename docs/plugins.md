@@ -506,6 +506,27 @@ tracks before LRCLIB (tags and `.lrc` files are for local files only):
   track's `plugin://` URI.
 - The lyrics panel names the plugin as the source.
 
+A synced line may also time its words, for karaoke-style highlighting
+(optional; older hosts ignore the field, as any unknown one):
+
+```jsonc
+{"time_ms": 12340, "text": "Some words here", "words": [
+  {"time_ms": 12340, "text": "Some"},
+  {"time_ms": 12800, "text": "words"},
+  {"time_ms": 13310, "text": "here"}
+]}
+```
+
+- Each word's `text` is a piece of the line's `text`, in order: the host
+  finds it there, so the spaces between words may be left out, and words
+  may be syllables (`"beau"`, `"ti"`, `"ful"`). Text before the first word
+  is sung with it.
+- A word lasts until the next one starts, the last one until the next
+  line. Times are absolute, like the line's; a time earlier than the
+  previous word's is moved up to it.
+- A line whose words are not all found in its text, or whose `words` is
+  malformed, is shown line by line. At most 500 words per line.
+
 ## Playlist editing (optional)
 
 With the `playlist_edit` capability, the user can create, rename and delete
@@ -699,7 +720,7 @@ to a UI message and never shows raw text from the plugin as HTML.
 | `ricercar-daemon` | Start and stop the `PluginHost` in `AppContext`. Send `output.changed` on device switch. Plugin status in the diagnostic report. `set_plugin_setting` / `reset_plugin_settings`: check, save and apply off the calling thread. |
 | `ricercar-ui` | Sidebar section per signed-in plugin, from `browse.root`. Generic browse page (grid for albums and playlists, track table for tracks). Plugins with `library` feed the Albums, Artists and Tracks pages (merged in the page's order, with a source badge and a source filter); plugin albums open on the album page. The global search shows local results at once, then each signed-in plugin's (its `search`, or matches in its library list) as they come, marked with their source. Sign-in dialog (open browser, QR code, paste field). A settings row per plugin (status, sign in/out, enable, and a settings button for plugins that declare settings, opening a dialog of switches, text and number fields and choices, grouped by section). "Source: <plugin>" hop in the signal path. Every new string goes through `@tr()`. |
 | `ricercar-online` / scrobble | Plugin tracks scrobble from their metadata (`path` is `None`). |
-| `ricercar-online` / lyrics | `LyricsSource::Plugin(id)`; for a `plugin://` track, the plugin (with `lyrics`) then LRCLIB, cached under the URI, `not_found` kept a day. The plugin is asked through a callback (`ricercar-daemon::lyrics`). |
+| `ricercar-online` / lyrics | `LyricsSource::Plugin(id)`; for a `plugin://` track, the plugin (with `lyrics`) then LRCLIB, cached under the URI, `not_found` kept a day. The plugin is asked through a callback (`ricercar-daemon::lyrics`). Synced lines carry the plugin's `words` (`LyricLine::words`), like enhanced LRC. |
 | `ricercar-upnp` | No change. ContentDirectory still serves the local library only. Plugin tracks in the queue are shown with their metadata. |
 | Docs | README: "Features", "Is this a … client?" FAQ and the promise wording (the core ships no service API; third-party plugins may add catalogues). HACKING.md: plugin host map. |
 
