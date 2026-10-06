@@ -377,12 +377,54 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            // The audio setup, opened from the settings: the outputs, the
+            // example capabilities above, fixed volume, the summary.
+            "setup-output",
+            (
+                900,
+                Box::new(|ui| {
+                    ui.app().set_settings_at_end(false);
+                    crate::setup::open(ui);
+                }),
+            ),
+        ),
+        (
+            "setup-dac",
+            (
+                700,
+                Box::new(|ui| {
+                    let hw = ricercar_audio::device::list_devices()
+                        .into_iter()
+                        .find(|d| d.kind == ricercar_audio::DeviceKind::Hardware);
+                    if let Some(d) = hw {
+                        ui.app().invoke_setup_pick(d.name.into());
+                    }
+                    ui.app().set_setup_step(1);
+                }),
+            ),
+        ),
+        (
+            "setup-volume",
+            (
+                600,
+                Box::new(|ui| {
+                    ui.app().set_setup_fixed(true);
+                    ui.app().set_setup_step(2);
+                }),
+            ),
+        ),
+        (
+            "setup-done",
+            (600, Box::new(|ui| ui.app().set_setup_step(3))),
+        ),
+        (
             // An album ripped as one file with a cue sheet: its tracks,
             // and the second one playing.
             "cue-album",
             (
                 1500,
                 Box::new(move |ui| {
+                    ui.app().set_setup_open(false);
                     let id = one_take();
                     let tracks = ui.ctx.lib.album_tracks(&id);
                     let ctl = ui.ctx.ctl.clone();

@@ -301,6 +301,18 @@ pub fn dac_refuses(rate: u32, accepts: Option<&str>) -> String {
     }
 }
 
+/// The setup's verdict on a DAC, from `dac::best`: "Plays up to 192 kHz /
+/// 32-bit natively".
+pub fn dac_verdict(best: Option<(u32, u32)>) -> String {
+    match best {
+        Some((rate, bits)) => tf(
+            "Plays up to {rate} kHz / {bits}-bit natively",
+            &[("rate", &khz_local(rate)), ("bits", &bits.to_string())],
+        ),
+        None => t("Accepts no usual music format natively").to_string(),
+    }
+}
+
 pub fn count(n: usize, one: &'static str, many: &'static str) -> String {
     format!("{n} {}", if n == 1 { t(one) } else { t(many) })
 }
@@ -472,6 +484,11 @@ mod tests {
             "The DAC refuses 352.8 kHz (accepts: 44.1–192 kHz)"
         );
         assert_eq!(
+            dac_verdict(Some((192_000, 32))),
+            "Plays up to 192 kHz / 32-bit natively"
+        );
+        assert_eq!(dac_verdict(None), "Accepts no usual music format natively");
+        assert_eq!(
             install_body("Demo", "1.0", "", "github.com", "https://x"),
             "Demo 1.0 will be downloaded from github.com and run with your permissions. ricercar checks that the file matches the catalogue (SHA-256) but does not review what the plugin does. Source: https://x"
         );
@@ -494,6 +511,10 @@ mod tests {
             assert!(
                 install_body("Demo", "1.0", "Jo", "github.com", "https://x")
                     .starts_with("Demo 1.0 de Jo sera téléchargé depuis github.com")
+            );
+            assert_eq!(
+                dac_verdict(Some((352_800, 24))),
+                "Lit jusqu'à 352,8 kHz / 24 bits en natif"
             );
             assert!(host_changed("a.org", "b.org").starts_with("Attention : l'adresse"));
         });

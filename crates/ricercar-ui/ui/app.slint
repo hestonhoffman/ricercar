@@ -8,6 +8,7 @@ import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, G
 import { RadioPage, SettingsPage } from "more.slint";
 import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays.slint";
 import { BrowsePage, SignInDialog, PluginSettingsDialog, PluginsPage } from "plugins.slint";
+import { SetupAssistant } from "setup.slint";
 
 export { App, Page, Theme, TrackMenu }
 export { AlbumCard, TrackRow, ArtistCard, GenreCard, PlaylistItem, PlaylistTarget, QueueRow, LyricLine, StationRow, DeviceRow, CapChip, ChainHop, BufferedPart, MenuEntry, ItemAction } from "state.slint";
@@ -68,6 +69,10 @@ export component MainWindow inherits Window {
     changed w-psettings => {
         if !w-psettings { keys.focus(); }
     }
+    private property <bool> w-setup: App.setup-open;
+    changed w-setup => {
+        if !w-setup { keys.focus(); }
+    }
 
     // A menu opened from the keyboard gives the focus back to the window
     // (its lines are gone).
@@ -97,7 +102,7 @@ export component MainWindow inherits Window {
                 keys.focus();
                 return accept;
             }
-            if dialog != 0 || App.signin-open || App.install-open || App.link-open || App.root-path-open || App.psettings-open { return reject; }
+            if dialog != 0 || App.signin-open || App.install-open || App.link-open || App.root-path-open || App.psettings-open || App.setup-open { return reject; }
             if e.text == " " {
                 App.play-pause();
                 return accept;
@@ -322,6 +327,10 @@ export component MainWindow inherits Window {
     }
 
     if App.psettings-open: PluginSettingsDialog { }
+
+    if App.setup-open: SetupAssistant {
+        init => { self.focus(); }
+    }
 
     init => {
         Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;

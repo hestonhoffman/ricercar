@@ -16,6 +16,7 @@ mod plugin_menu;
 mod plugin_settings;
 mod plugins;
 mod profile;
+mod setup;
 mod snapshot;
 mod sys;
 mod text;

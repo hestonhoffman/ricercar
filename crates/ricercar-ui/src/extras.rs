@@ -647,7 +647,13 @@ pub fn refresh_devices(ui: &Ui) {
             ..Default::default()
         });
     }
+    crate::setup::refresh(ui, &rows);
     ui.app().set_devices(ModelRc::new(VecModel::from(rows)));
+}
+
+/// The device's capabilities are being read right now.
+pub fn probing(ui: &Ui, name: &str) -> bool {
+    ui.extras.borrow().probing.contains(name)
 }
 
 /// Read what every hw: device accepts, off the UI thread. The device we
@@ -890,6 +896,27 @@ fn lastfm_finish(ui: &Rc<Ui>) {
 
 // ------------------------------------------------------------------ wiring
 
+/// Play on `name` from now on (settings list, audio setup).
+pub fn select_device(ui: &Ui, name: &str) {
+    let desc = ui
+        .app()
+        .get_devices()
+        .iter()
+        .find(|d| d.name == name)
+        .map(|d| d.desc.to_string());
+    if let Some(desc) = &desc {
+        crate::outputs::remember_picked(ui, name, desc);
+    }
+    ui.ctx.update_config(|c| c.audio.device = name.to_string());
+    crate::plugins::push_output(ui);
+    refresh_devices(ui);
+    let shown = match (&desc, ricercar_audio::device::pipewire_node(name)) {
+        (Some(desc), Some(_)) => crate::outputs::readable(desc),
+        _ => name,
+    };
+    ui.toast(format!("{}: {shown}", t("Output device")), false);
+}
+
 pub fn wire(ui: &Rc<Ui>) {
     apply_theme(ui);
     {
@@ -898,28 +925,7 @@ pub fn wire(ui: &Rc<Ui>) {
     }
     let app = ui.app();
     app.on_settings_changed(|| with_ui(settings_changed));
-    app.on_select_device(|name| {
-        with_ui(|ui| {
-            let name = name.to_string();
-            let desc = ui
-                .app()
-                .get_devices()
-                .iter()
-                .find(|d| d.name == name.as_str())
-                .map(|d| d.desc.to_string());
-            if let Some(desc) = &desc {
-                crate::outputs::remember_picked(ui, &name, desc);
-            }
-            ui.ctx.update_config(|c| c.audio.device = name.clone());
-            crate::plugins::push_output(ui);
-            refresh_devices(ui);
-            let shown = match (&desc, ricercar_audio::device::pipewire_node(&name)) {
-                (Some(desc), Some(_)) => crate::outputs::readable(desc).to_string(),
-                _ => name,
-            };
-            ui.toast(format!("{}: {shown}", t("Output device")), false);
-        })
-    });
+    app.on_select_device(|name| with_ui(|ui| select_device(ui, &name)));
     app.on_select_net_iface(|i| {
         with_ui(|ui| {
             let name = ui

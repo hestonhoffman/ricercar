@@ -307,7 +307,10 @@ Install `dist/io.github.ricercar_player.ricercar.metainfo.xml` into
    is indexed automatically; add others in **Settings → Library**.
 2. Pick your DAC in **Settings → Audio output**. `hw:` devices are marked
    **BIT-PERFECT**; `default` / `pipewire` are marked **SHARED** (they go
-   through the system mixer).
+   through the system mixer). On the first start, a short audio setup
+   walks through this (output, what the DAC accepts, fixed volume); it is
+   skipped when an output is already configured, and **Audio setup** in the
+   same section opens it again.
 3. Press play. The green dot on the chain line under the seek bar means
    bit-perfect.
 
@@ -469,6 +472,7 @@ notifications = true
 tray = true
 close_to_tray = false
 language = ""              # en, fr, de, es, it, ja; empty follows the system
+audio_setup_done = false   # the first-run audio setup was finished or skipped
 
 [scrobble]
 listenbrainz_token = ""

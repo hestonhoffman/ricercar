@@ -415,6 +415,18 @@ msgid "Refresh"
 msgstr "Aggiorna"
 
 msgctxt "SettingsPage"
+msgid "Audio setup"
+msgstr "Configurazione audio"
+
+msgctxt "SettingsPage"
+msgid "Choose the output, check the DAC and the volume mode, step by step."
+msgstr "Scegliere l'uscita, controllare il DAC e la modalità del volume, passo per passo."
+
+msgctxt "SettingsPage"
+msgid "Open"
+msgstr "Apri"
+
+msgctxt "SettingsPage"
 msgid "ReplayGain"
 msgstr "ReplayGain"
 
@@ -573,10 +585,6 @@ msgid "{n} plugin"
 msgid_plural "{n} plugins"
 msgstr[0] "{n} plugin"
 msgstr[1] "{n} plugin"
-
-msgctxt "SettingsPage"
-msgid "Open"
-msgstr "Apri"
 
 msgctxt "SettingsPage"
 msgid "Scrobbling"
@@ -1549,6 +1557,102 @@ msgstr "Installa"
 msgctxt "PluginsPage"
 msgid "No build for this computer"
 msgstr "Nessuna build per questo computer"
+
+msgctxt "SetupOutput"
+msgid "BIT-PERFECT"
+msgstr "BIT-PERFECT"
+
+msgctxt "SetupOutput"
+msgid "SHARED"
+msgstr "CONDIVISO"
+
+msgctxt "SetupOutput"
+msgid "NOT CONNECTED"
+msgstr "NON CONNESSO"
+
+msgctxt "SetupAssistant"
+msgid "Audio setup · step {} of 4"
+msgstr "Configurazione audio · passo {} di 4"
+
+msgctxt "SetupAssistant"
+msgid "Choose the output"
+msgstr "Scegliere l'uscita"
+
+msgctxt "SetupAssistant"
+msgid "Check the DAC"
+msgstr "Controllare il DAC"
+
+msgctxt "SetupAssistant"
+msgid "Volume"
+msgstr "Volume"
+
+msgctxt "SetupAssistant"
+msgid "Ready"
+msgstr "Pronto"
+
+msgctxt "SetupAssistant"
+msgid "Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample."
+msgstr "Le uscite hardware (hw:) inviano la musica al DAC senza modifiche, alla frequenza di ogni brano. Le uscite predefinita e PipeWire passano per il mixer di sistema, che può ricampionare."
+
+msgctxt "SetupAssistant"
+msgid "Bit-perfect (recommended)"
+msgstr "Bit-perfect (consigliato)"
+
+msgctxt "SetupAssistant"
+msgid "Shared"
+msgstr "Condivise"
+
+msgctxt "SetupAssistant"
+msgid "Sample rates"
+msgstr "Frequenze"
+
+msgctxt "SetupAssistant"
+msgid "Containers"
+msgstr "Contenitori"
+
+msgctxt "SetupAssistant"
+msgid "With fixed volume, ricercar always plays at 100 % and ignores volume changes, so the samples reach the DAC untouched. You then set the volume on your DAC or amplifier: turn it down before the first track."
+msgstr "Con il volume fisso, ricercar riproduce sempre al 100 % e ignora le modifiche del volume: i campioni arrivano al DAC senza modifiche. Il volume si regola allora sul DAC o sull'amplificatore: abbassalo prima del primo brano."
+
+msgctxt "SetupAssistant"
+msgid "Fixed volume (bit-perfect)"
+msgstr "Volume fisso (bit-perfect)"
+
+msgctxt "SetupAssistant"
+msgid "Output"
+msgstr "Uscita"
+
+msgctxt "SetupAssistant"
+msgid "Fixed volume"
+msgstr "Volume fisso"
+
+msgctxt "SetupAssistant"
+msgid "On"
+msgstr "Attivo"
+
+msgctxt "SetupAssistant"
+msgid "Off"
+msgstr "Disattivo"
+
+msgctxt "SetupAssistant"
+msgid "You can change these later in Settings → Audio output."
+msgstr "Puoi modificarle più tardi in Impostazioni → Uscita audio."
+
+msgctxt "SetupAssistant"
+msgid "Later"
+msgstr "Più tardi"
+
+msgctxt "SetupAssistant"
+msgid "Back"
+msgstr "Indietro"
+
+msgctxt "SetupAssistant"
+msgid "Next"
+msgstr "Successivo"
+
+msgctxt "SetupAssistant"
+msgid "Save"
+msgstr "Salva"
 
 msgctxt ""
 msgid "Everything"

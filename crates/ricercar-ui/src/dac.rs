@@ -108,6 +108,22 @@ pub fn rates_summary(rates: &[u32]) -> String {
     }
 }
 
+/// Highest music rate and deepest container the device accepts: (rate,
+/// bits), for the setup's verdict. `None` when it takes neither.
+pub fn best(c: &CachedCaps) -> Option<(u32, u32)> {
+    let rate = c.rates.iter().copied().filter(|&r| r >= 44_100).max()?;
+    let bits = if c.supports(Container::S32) {
+        32
+    } else if c.supports(Container::S24) || c.supports(Container::S24_3) {
+        24
+    } else if c.supports(Container::S16) {
+        16
+    } else {
+        return None;
+    };
+    Some((rate, bits))
+}
+
 /// Library rates this device cannot play natively: (rate, albums).
 pub fn unsupported(hist: &[RateCount], c: &CachedCaps) -> Vec<(u32, u32)> {
     hist.iter()
@@ -178,6 +194,20 @@ mod tests {
         wide.channels_min = 1;
         wide.channels_max = 8;
         assert_eq!(channels_label(&wide), "1–8");
+    }
+
+    #[test]
+    fn best_rate_and_depth() {
+        let c = caps(&[8_000, 44_100, 48_000, 96_000, 192_000]);
+        assert_eq!(best(&c), Some((192_000, 32)));
+        let mut c = caps(&[44_100, 48_000]);
+        c.formats = vec!["S16_LE".into(), "S24_3LE".into()];
+        assert_eq!(best(&c), Some((48_000, 24)));
+        c.formats = vec!["S16_LE".into()];
+        assert_eq!(best(&c), Some((48_000, 16)));
+        c.formats.clear();
+        assert_eq!(best(&c), None);
+        assert_eq!(best(&caps(&[8_000, 32_000])), None);
     }
 
     #[test]

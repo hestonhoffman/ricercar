@@ -1,0 +1,177 @@
+import { Theme } from "theme.slint";
+import { App, DeviceRow } from "state.slint";
+import { Button, Badge, Toggle } from "widgets.slint";
+import { CapLine } from "more.slint";
+
+// ------------------------------------------------------------------ audio setup
+
+component SetupOutput inherits Rectangle {
+    in property <DeviceRow> dev;
+    height: 52px;
+    border-radius: Theme.r-md;
+    background: ta.has-hover || dev.selected ? Theme.hover : transparent;
+    accessible-role: button;
+    accessible-label: dev.desc;
+    accessible-action-default => { App.setup-pick(dev.name); }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { App.setup-pick(dev.name); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            border-width: 2px;
+            border-color: dev.selected ? Theme.accent : Theme.line-strong;
+            if dev.selected: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: dev.desc; font-size: Theme.fs-md; font-weight: 500; color: Theme.text; overflow: elide; }
+            Text { text: dev.name; font-size: Theme.fs-sm; color: Theme.text2; overflow: elide; }
+        }
+        if dev.hardware: Badge { y: (parent.height - self.height) / 2; text: @tr("BIT-PERFECT"); tint: Theme.good; }
+        if dev.shared: Badge { y: (parent.height - self.height) / 2; text: @tr("SHARED"); tint: Theme.warn; }
+        if dev.absent: Badge { y: (parent.height - self.height) / 2; text: @tr("NOT CONNECTED"); tint: Theme.warn; }
+    }
+}
+
+component SetupHeading inherits Text {
+    font-size: Theme.fs-sm;
+    font-weight: 700;
+    color: Theme.text2;
+    height: self.preferred-height + 10px;
+    vertical-alignment: bottom;
+}
+
+/// First-run audio setup (setup.rs): output, DAC, volume, summary. Nothing
+/// is applied before Save; Later (or Escape) closes it for good.
+export component SetupAssistant inherits Rectangle {
+    // Wrapped text gets this width explicitly: its height then covers
+    // every line.
+    private property <length> body-width: 520px;
+    private property <int> step: App.setup-step;
+    background: Theme.scrim;
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Escape {
+                App.setup-skip();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: root.body-width + 48px;
+            height: lay.preferred-height;
+            border-radius: Theme.r-lg;
+            background: Theme.overlay;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 16px;
+            drop-shadow-color: #000000b3;
+            TouchArea { }
+            lay := VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                Text { text: @tr("Audio setup · step {} of 4", step + 1); font-size: Theme.fs-sm; color: Theme.text3; }
+                Text {
+                    text: step == 0 ? @tr("Choose the output") : step == 1 ? @tr("Check the DAC") : step == 2 ? @tr("Volume") : @tr("Ready");
+                    font-size: Theme.fs-xl;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+
+                if step == 0: Text {
+                    text: @tr("Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample.");
+                    font-size: Theme.fs-md;
+                    color: Theme.text2;
+                    wrap: word-wrap;
+                    width: root.body-width;
+                }
+                if step == 0: fl := Flickable {
+                    height: min(list.preferred-height, root.height - 320px);
+                    content-height: list.preferred-height;
+                    list := VerticalLayout {
+                        width: fl.width;
+                        for d[i] in App.setup-outputs: VerticalLayout {
+                            if d.hardware && i == 0: SetupHeading { text: @tr("Bit-perfect (recommended)"); }
+                            if !d.hardware && (i == 0 || App.setup-outputs[max(i - 1, 0)].hardware): SetupHeading { text: @tr("Shared"); }
+                            SetupOutput { dev: d; }
+                        }
+                    }
+                }
+
+                if step == 1: VerticalLayout {
+                    spacing: 10px;
+                    Text { text: App.setup-dev.desc; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
+                    if App.setup-dev.caps-status != "": Text { text: App.setup-dev.caps-status; font-size: Theme.fs-sm; color: Theme.text3; wrap: word-wrap; width: root.body-width; }
+                    if App.setup-dev.caps-known: CapLine { label: @tr("Sample rates"); chips: App.setup-dev.rates; }
+                    if App.setup-dev.caps-known: CapLine { label: @tr("Containers"); chips: App.setup-dev.formats; }
+                    if App.setup-verdict != "": Text { text: App.setup-verdict; font-size: Theme.fs-md; font-weight: 600; color: Theme.good; wrap: word-wrap; width: root.body-width; }
+                    if App.setup-note != "": Text { text: App.setup-note; font-size: Theme.fs-md; color: Theme.text2; wrap: word-wrap; width: root.body-width; }
+                }
+
+                if step == 2: VerticalLayout {
+                    spacing: 14px;
+                    Text {
+                        text: @tr("With fixed volume, ricercar always plays at 100 % and ignores volume changes, so the samples reach the DAC untouched. You then set the volume on your DAC or amplifier: turn it down before the first track.");
+                        font-size: Theme.fs-md;
+                        color: Theme.text2;
+                        wrap: word-wrap;
+                        width: root.body-width;
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: @tr("Fixed volume (bit-perfect)"); font-size: Theme.fs-md; font-weight: 500; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                        Toggle { label: @tr("Fixed volume (bit-perfect)"); checked <=> App.setup-fixed; }
+                    }
+                }
+
+                if step == 3: VerticalLayout {
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { width: 130px; text: @tr("Output"); font-size: Theme.fs-md; color: Theme.text3; }
+                        Text { text: App.setup-dev.desc + " (" + App.setup-dev.name + ")"; font-size: Theme.fs-md; color: Theme.text; overflow: elide; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text { width: 130px; text: @tr("Fixed volume"); font-size: Theme.fs-md; color: Theme.text3; }
+                        Text { text: App.setup-fixed ? @tr("On") : @tr("Off"); font-size: Theme.fs-md; color: Theme.text; }
+                    }
+                    Text {
+                        text: @tr("You can change these later in Settings → Audio output.");
+                        font-size: Theme.fs-sm;
+                        color: Theme.text2;
+                        wrap: word-wrap;
+                        width: root.body-width;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    padding-top: 6px;
+                    Button { text: @tr("Later"); clicked => { App.setup-skip(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if step > 0: Button { text: @tr("Back"); clicked => { App.setup-step = step - 1; } }
+                    if step < 3: Button {
+                        text: @tr("Next");
+                        primary: true;
+                        enabled: App.setup-dev.name != "";
+                        clicked => { App.setup-step = step + 1; }
+                    }
+                    if step == 3: Button { text: @tr("Save"); primary: true; clicked => { App.setup-finish(); } }
+                }
+            }
+        }
+    }
+}
