@@ -160,13 +160,17 @@ pub struct Playlist {
 #[derive(Debug, Clone, Default)]
 pub struct SearchResults {
     pub artists: Vec<Artist>,
+    pub composers: Vec<Artist>,
     pub albums: Vec<Album>,
     pub tracks: Vec<Track>,
 }
 
 impl SearchResults {
     pub fn is_empty(&self) -> bool {
-        self.artists.is_empty() && self.albums.is_empty() && self.tracks.is_empty()
+        self.artists.is_empty()
+            && self.composers.is_empty()
+            && self.albums.is_empty()
+            && self.tracks.is_empty()
     }
 }
 
@@ -266,6 +270,7 @@ fn schema(conn: &Connection) -> rusqlite::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_tracks_aa ON tracks(album_artist COLLATE NOCASE);
          CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at);
          CREATE INDEX IF NOT EXISTS idx_tracks_name ON tracks(COALESCE(album_artist, artist) COLLATE NOCASE);
+         CREATE INDEX IF NOT EXISTS idx_tracks_composer ON tracks(composer COLLATE NOCASE);
 
          CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
             title, artist, album, album_artist, genre, composer,
@@ -499,6 +504,10 @@ fn row_to_playlist(r: &rusqlite::Row<'_>) -> rusqlite::Result<Playlist> {
 /// Artist rows: `COALESCE(album_artist, artist)` grouped case-insensitively
 /// (the expression matches `idx_tracks_name`).
 const ARTIST_SELECT: &str = "SELECT COALESCE(album_artist, artist) AS name,
+    COUNT(DISTINCT album_id), COUNT(*), MIN(path) FROM tracks";
+
+/// Composers read as artists: the name is the COMPOSER tag.
+const COMPOSER_SELECT: &str = "SELECT composer AS name,
     COUNT(DISTINCT album_id), COUNT(*), MIN(path) FROM tracks";
 
 fn row_to_artist(r: &rusqlite::Row<'_>) -> rusqlite::Result<Artist> {
@@ -1274,6 +1283,67 @@ impl Library {
         )
     }
 
+    // ------------------------------------------------------------ composers
+
+    /// Composers (the COMPOSER tag), one per name in any case, with their
+    /// album and track counts and a track to take a cover from.
+    pub fn composers(&self) -> Vec<Artist> {
+        self.query(
+            &format!(
+                "{COMPOSER_SELECT} WHERE name IS NOT NULL AND name != ''
+                 GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE"
+            ),
+            [],
+            row_to_artist,
+        )
+    }
+
+    /// The composers with these names (any case), in no particular order.
+    fn composers_named(&self, names: &[String]) -> Vec<Artist> {
+        if names.is_empty() {
+            return Vec::new();
+        }
+        let marks = vec!["?"; names.len()].join(",");
+        self.query(
+            &format!(
+                "{COMPOSER_SELECT} WHERE composer COLLATE NOCASE IN ({marks})
+                 GROUP BY name COLLATE NOCASE"
+            ),
+            params_from_iter(names.iter()),
+            row_to_artist,
+        )
+    }
+
+    /// The albums holding works by a composer, newest first.
+    pub fn composer_albums(&self, name: &str) -> Vec<Album> {
+        self.query(
+            &format!(
+                "{ALBUM_SELECT} WHERE t.album_id IN (
+                    SELECT album_id FROM tracks WHERE composer = ?1 COLLATE NOCASE)
+                 GROUP BY t.album_id ORDER BY MIN(t.year) DESC, MAX(t.album), t.album_id"
+            ),
+            [name],
+            row_to_album,
+        )
+    }
+
+    /// A composer's tracks, album by album in the order of
+    /// `composer_albums`, then by disc and track number.
+    pub fn composer_tracks(&self, name: &str) -> Vec<Track> {
+        self.query(
+            &format!(
+                "SELECT {TRACK_COLS} FROM tracks t LEFT JOIN stats s ON s.path = t.path
+                 JOIN (SELECT album_id, MIN(year) AS year, MAX(album) AS album FROM tracks
+                       WHERE album_id IN (SELECT album_id FROM tracks WHERE composer = ?1 COLLATE NOCASE)
+                       GROUP BY album_id) a ON a.album_id = t.album_id
+                 WHERE t.composer = ?1 COLLATE NOCASE
+                 ORDER BY a.year DESC, a.album, t.album_id, COALESCE(t.disc,1), COALESCE(t.track,0), t.id"
+            ),
+            [name],
+            row_to_track,
+        )
+    }
+
     // ------------------------------------------------------------ tracks
 
     pub fn tracks(&self, sort: TrackSort) -> Vec<Track> {
@@ -1465,8 +1535,23 @@ impl Library {
                 .position(|n| n.eq_ignore_ascii_case(&a.name))
                 .unwrap_or(usize::MAX)
         });
+        let composer_names: Vec<String> = self.query(
+            "SELECT t.composer AS n FROM tracks_fts f JOIN tracks t ON t.id = f.rowid
+             WHERE tracks_fts MATCH ?1 AND n IS NOT NULL
+             GROUP BY n COLLATE NOCASE ORDER BY COUNT(*) DESC LIMIT 12",
+            [format!("{{composer}} : ({fq})")],
+            |r| r.get(0),
+        );
+        let mut composers = self.composers_named(&composer_names);
+        composers.sort_by_key(|a| {
+            composer_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(&a.name))
+                .unwrap_or(usize::MAX)
+        });
         SearchResults {
             artists,
+            composers,
             albums: self.albums_by_ids(&album_ids),
             tracks,
         }
@@ -1880,6 +1965,84 @@ mod tests {
                 tracks: 5
             }]
         );
+    }
+
+    #[test]
+    fn composers_list_their_albums_and_tracks() {
+        let work = |title: &str, album: &str, year: i32, n: u32, composer: Option<&str>| TagInfo {
+            year: Some(year),
+            composer: composer.map(Into::into),
+            ..tags(title, "Glenn Gould", album, Some("Glenn Gould"), n)
+        };
+        let lib = lib_with(&[
+            (
+                "/m/gb/1.flac",
+                work(
+                    "Aria",
+                    "Goldberg Variations",
+                    1981,
+                    1,
+                    Some("Johann Sebastian Bach"),
+                ),
+            ),
+            (
+                "/m/gb/2.flac",
+                work(
+                    "Variatio 1",
+                    "Goldberg Variations",
+                    1981,
+                    2,
+                    Some("Johann Sebastian Bach"),
+                ),
+            ),
+            (
+                "/m/mix/2.flac",
+                work(
+                    "Sonata K. 545",
+                    "Recital",
+                    1955,
+                    2,
+                    Some("Wolfgang Amadeus Mozart"),
+                ),
+            ),
+            (
+                "/m/mix/1.flac",
+                work(
+                    "Partita No. 2",
+                    "Recital",
+                    1955,
+                    1,
+                    Some("johann sebastian bach"),
+                ),
+            ),
+            (
+                "/m/mix/3.flac",
+                work("Improvisation", "Recital", 1955, 3, None),
+            ),
+        ]);
+        let composers = lib.composers();
+        let names: Vec<_> = composers.iter().map(|c| c.name.to_lowercase()).collect();
+        assert_eq!(names, ["johann sebastian bach", "wolfgang amadeus mozart"]);
+        // One entry per name in any case.
+        assert_eq!((composers[0].album_count, composers[0].track_count), (2, 3));
+        assert_eq!((composers[1].album_count, composers[1].track_count), (1, 1));
+
+        let albums = lib.composer_albums("JOHANN SEBASTIAN BACH");
+        let titles: Vec<_> = albums.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(titles, ["Goldberg Variations", "Recital"]);
+        // The whole album is listed, works by others included.
+        assert_eq!(albums[1].track_count, 3);
+        // Tracks follow the albums, then their numbers.
+        let tracks = lib.composer_tracks("Johann Sebastian Bach");
+        let titles: Vec<_> = tracks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, ["Aria", "Variatio 1", "Partita No. 2"]);
+        assert!(lib.composer_tracks("Nobody").is_empty());
+
+        let r = lib.search("mozart");
+        assert_eq!(r.composers.len(), 1);
+        assert_eq!(r.composers[0].name, "Wolfgang Amadeus Mozart");
+        // Artists are not composers.
+        assert!(lib.search("gould").composers.is_empty());
     }
 
     #[test]
