@@ -174,16 +174,20 @@ pub struct Models {
     pub ar_own: Rows<AlbumCard>,
     pub ar_appears: Rows<AlbumCard>,
     pub ge_albums: Rows<AlbumCard>,
+    pub cp_albums: Rows<AlbumCard>,
     pub fav_albums: Rows<AlbumCard>,
     pub s_albums: Rows<AlbumCard>,
     pub s_playlists: Rows<AlbumCard>,
     pub artists: Rows<ArtistCard>,
     pub s_artists: Rows<ArtistCard>,
+    pub composers: Rows<ArtistCard>,
+    pub s_composers: Rows<ArtistCard>,
     pub tracks: Rows<TrackRow>,
     pub home_tracks: Rows<TrackRow>,
     pub home_recent: Rows<TrackRow>,
     pub al_tracks: Rows<TrackRow>,
     pub ar_top: Rows<TrackRow>,
+    pub cp_works: Rows<TrackRow>,
     pub fav_tracks: Rows<TrackRow>,
     pub pl_tracks: Rows<TrackRow>,
     pub s_tracks: Rows<TrackRow>,
@@ -194,7 +198,7 @@ pub struct Models {
 }
 
 impl Models {
-    fn album_models(&self) -> [&Rows<AlbumCard>; 12] {
+    fn album_models(&self) -> [&Rows<AlbumCard>; 13] {
         [
             &self.br_cards,
             &self.albums,
@@ -205,13 +209,14 @@ impl Models {
             &self.ar_own,
             &self.ar_appears,
             &self.ge_albums,
+            &self.cp_albums,
             &self.fav_albums,
             &self.s_albums,
             &self.s_playlists,
         ]
     }
 
-    pub fn track_models(&self) -> [&Rows<TrackRow>; 9] {
+    pub fn track_models(&self) -> [&Rows<TrackRow>; 10] {
         [
             &self.br_tracks,
             &self.tracks,
@@ -219,6 +224,7 @@ impl Models {
             &self.home_recent,
             &self.al_tracks,
             &self.ar_top,
+            &self.cp_works,
             &self.fav_tracks,
             &self.pl_tracks,
             &self.s_tracks,
@@ -233,6 +239,7 @@ impl Models {
             "home-recent" => &self.home_recent,
             "album" => &self.al_tracks,
             "artist-top" => &self.ar_top,
+            "composer" => &self.cp_works,
             "fav" => &self.fav_tracks,
             "playlist" => &self.pl_tracks,
             "search" => &self.s_tracks,
@@ -355,6 +362,8 @@ impl Ui {
                     }
                     self.models.artists.patch_cover(key, &img);
                     self.models.s_artists.patch_cover(key, &img);
+                    self.models.composers.patch_cover(key, &img);
+                    self.models.s_composers.patch_cover(key, &img);
                 }
                 THUMB => {
                     for m in self.models.track_models() {
@@ -646,13 +655,17 @@ fn bind_models(ui: &Rc<Ui>) {
     app.set_ar_appears(model(&m.ar_appears));
     app.set_ar_top(model(&m.ar_top));
     app.set_ge_albums(model(&m.ge_albums));
+    app.set_cp_album_list(model(&m.cp_albums));
+    app.set_cp_works(model(&m.cp_works));
     app.set_fav_albums(model(&m.fav_albums));
     app.set_fav_tracks(model(&m.fav_tracks));
     app.set_s_albums(model(&m.s_albums));
     app.set_s_playlists(model(&m.s_playlists));
     app.set_s_artists(model(&m.s_artists));
+    app.set_s_composers(model(&m.s_composers));
     app.set_s_tracks(model(&m.s_tracks));
     app.set_artists(model(&m.artists));
+    app.set_composers(model(&m.composers));
     app.set_tracks(model(&m.tracks));
     app.set_pl_tracks(model(&m.pl_tracks));
     app.set_queue(model(&m.queue));

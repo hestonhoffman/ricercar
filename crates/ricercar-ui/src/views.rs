@@ -133,6 +133,16 @@ pub fn load(ui: &Rc<Ui>, page: Page, arg: &str) {
                 .collect();
             set_rows(&m.ge_albums, rows);
         }
+        Page::Composers => {
+            let rows: Vec<_> = lib
+                .composers()
+                .iter()
+                .map(|c| artist_card(ui, c, false))
+                .collect();
+            set_rows(&m.composers, rows);
+            visible(ui, "composers", 0, 40);
+        }
+        Page::Composer => load_composer(ui, arg),
         Page::Favorites => {
             let albums: Vec<_> = lib
                 .favorite_albums()
@@ -432,6 +442,34 @@ fn load_artist(ui: &Rc<Ui>, name: &str) {
     crate::plugins::add_artist_albums(ui, name);
 }
 
+/// A composer's page: the albums with their works, then the works
+/// themselves, grouped under the title of their album.
+fn load_composer(ui: &Rc<Ui>, name: &str) {
+    let lib = &ui.ctx.lib;
+    let app = ui.app();
+    let albums = lib.composer_albums(name);
+    let tracks = lib.composer_tracks(name);
+    app.set_cp_name(name.into());
+    app.set_cp_albums(albums.len() as i32);
+    app.set_cp_tracks(tracks.len() as i32);
+    let cards: Vec<_> = albums.iter().map(|a| album_card(ui, a, true)).collect();
+    set_rows(&ui.models.cp_albums, cards);
+    let o = RowOpts {
+        track_numbers: true,
+        ..opts(false)
+    };
+    let mut rows = track_rows(ui, &tracks, o);
+    let mut last = None;
+    for (r, t) in rows.iter_mut().zip(&tracks) {
+        if last != Some(&t.album_id) {
+            last = Some(&t.album_id);
+            r.disc = t.album.clone().unwrap_or_default().into();
+        }
+    }
+    set_rows(&ui.models.cp_works, rows);
+    ui.st.borrow_mut().lists.insert("composer".into(), tracks);
+}
+
 fn load_playlist(ui: &Rc<Ui>, id: i64) {
     let lib = &ui.ctx.lib;
     let app = ui.app();
@@ -539,6 +577,17 @@ pub fn run_search(ui: &Rc<Ui>, q: &str) {
             .map(|p| playlist_card(ui, &p))
             .collect()
     };
+    // Composers come from the library only: none when the search is
+    // narrowed to one plugin.
+    let composers = if ui.app().get_search_scope() >= 2 {
+        Vec::new()
+    } else {
+        r.composers
+            .iter()
+            .map(|c| artist_card(ui, c, true))
+            .collect()
+    };
+    set_rows(&ui.models.s_composers, composers);
     let local = crate::plugins::LocalResults {
         artists: r.artists.iter().map(|a| artist_card(ui, a, true)).collect(),
         albums: r.albums.iter().map(|a| album_card(ui, a, true)).collect(),
@@ -561,6 +610,7 @@ pub fn visible(ui: &Rc<Ui>, list: &str, first: usize, last: usize) {
     let keys: Vec<(String, u32)> = match list {
         "albums" => missing(&m.albums, first, last, TILE),
         "artists" => missing(&m.artists, first, last, TILE),
+        "composers" => missing(&m.composers, first, last, TILE),
         "queue" => missing(&m.queue, first, last, THUMB),
         other => match m.track_model(other) {
             Some(m) => missing(m, first, last, THUMB),
@@ -628,9 +678,22 @@ fn context_for(ui: &Ui, list: &str) -> PlayContext {
     match list {
         "album" => PlayContext::Album(app.get_al_id().to_string()),
         "artist-top" => PlayContext::Artist(app.get_ar_name().to_string()),
+        "composer" => PlayContext::Artist(app.get_cp_name().to_string()),
         "playlist" => PlayContext::Playlist(app.get_pl_id() as i64),
         _ => PlayContext::None,
     }
+}
+
+/// The track under a track menu has a composer to go to (library lists;
+/// queue entries carry no composer).
+pub fn menu_has_composer(ui: &Ui) -> bool {
+    use slint::ComponentHandle;
+    let tm = ui.window.global::<crate::TrackMenu>();
+    let list = tm.get_list();
+    list != "queue"
+        && list_tracks(ui, &list)
+            .get(tm.get_index().max(0) as usize)
+            .is_some_and(|t| t.composer.as_deref().is_some_and(|c| !c.is_empty()))
 }
 
 pub fn track_activate(ui: &Rc<Ui>, list: &str, index: usize) {
@@ -692,6 +755,11 @@ pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
                 .or(tr.artist.clone())
                 .unwrap_or_default();
             ui.navigate(Page::Artist, &name, true);
+        }
+        "composer" => {
+            if let Some(name) = tr.composer.as_deref().filter(|c| !c.is_empty()) {
+                ui.navigate(Page::Composer, name, true);
+            }
         }
         "fav" => {
             let fav = !ui.ctx.lib.is_favorite(&tr.path);
@@ -816,6 +884,14 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
                 .flat_map(|a| lib.album_tracks(&a.id))
                 .collect();
             ctl.play_shuffled(infos(&tracks), PlayContext::Mix);
+            return;
+        }
+        "composer-play" | "composer-shuffle" | "composer-queue" => {
+            let tracks = lib.composer_tracks(id);
+            if !tracks.is_empty() {
+                let ctx = PlayContext::Artist(id.to_string());
+                play_or_queue(ui, &tracks, ctx, &action["composer-".len()..]);
+            }
             return;
         }
         _ => {}

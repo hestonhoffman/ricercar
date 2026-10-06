@@ -915,6 +915,130 @@ export component GenrePage inherits PageScroll {
     }
 }
 
+// ------------------------------------------------------------------ composers
+
+export component ComposersPage inherits Rectangle {
+    private property <length> gap: 20px;
+    private property <int> cols: max(1, floor((self.width - 64px + gap) / (150px + gap)));
+    private property <length> tile: (self.width - 64px - (cols - 1) * gap) / cols;
+    private property <length> row-h: tile + 48px + 20px;
+    private property <int> first-row: max(0, floor(-lv.content-y / row-h));
+    private property <string> window-key: first-row + ":" + lv.height / 1px + ":" + cols + ":" + App.composers.length;
+    changed window-key => {
+        App.visible("composers", first-row * cols, min(App.composers.length, (first-row + ceil(lv.height / row-h) + 2) * cols));
+    }
+    VerticalLayout {
+        Rectangle { height: 56px; }
+        HorizontalLayout {
+            padding-left: 32px;
+            padding-right: 32px;
+            padding-bottom: 20px;
+            spacing: 16px;
+            Text {
+                text: @tr("Composers");
+                font-family: Theme.display;
+                font-size: Theme.fs-3xl;
+                font-weight: 800;
+                letter-spacing: -0.8px;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Text { text: App.composers.length; font-size: Theme.fs-lg; color: Theme.text3; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+        if App.composers.length == 0: EmptyState {
+            icon: Icons.feather;
+            title: @tr("No composers");
+            body: @tr("Composers come from the COMPOSER tag of your files.");
+        }
+        lv := ListView {
+            vertical-stretch: 1;
+            for r in ceil(App.composers.length / cols): HorizontalLayout {
+                padding-left: 32px;
+                padding-right: 32px;
+                padding-bottom: 20px;
+                spacing: gap;
+                alignment: start;
+                for c in cols: Rectangle {
+                    width: tile;
+                    height: tile + 48px;
+                    property <int> idx: r * cols + c;
+                    if idx < App.composers.length: ArtistTile {
+                        size: tile;
+                        cover: App.composers[idx].cover;
+                        name: App.composers[idx].name;
+                        subtitle: @tr("{n} album" | "{n} albums" % App.composers[idx].albums);
+                        open => { App.navigate(Page.composer, App.composers[idx].name); }
+                    }
+                }
+            }
+        }
+    }
+    TopBar { y: 0; }
+}
+
+export component ComposerPage inherits PageScroll {
+    title: App.cp-name;
+    fade-at: 150px;
+    VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 10px;
+        if App.cp-album-list.length > 0: HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            padding-bottom: 8px;
+            for i in min(8, App.cp-album-list.length): Cover {
+                width: 76px;
+                height: 76px;
+                radius: 6px;
+                source: App.cp-album-list[i].cover;
+            }
+        }
+        Text {
+            text: App.cp-name;
+            font-family: Theme.display;
+            font-size: Theme.fs-3xl;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            color: Theme.text;
+            overflow: elide;
+        }
+        Text {
+            text: @tr("{n} album" | "{n} albums" % App.cp-albums) + " · " + @tr("{n} track" | "{n} tracks" % App.cp-tracks);
+            font-size: Theme.fs-md;
+            color: Theme.text2;
+        }
+        HorizontalLayout {
+            padding-top: 10px;
+            alignment: start;
+            ActionBar {
+                can-play: App.cp-tracks > 0;
+                can-queue: App.cp-tracks > 0;
+                play => { App.album-action(App.cp-name, "composer-play"); }
+                shuffle => { App.album-action(App.cp-name, "composer-shuffle"); }
+                queue => { App.album-action(App.cp-name, "composer-queue"); }
+            }
+        }
+    }
+    if App.cp-album-list.length > 0: VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 28px;
+        spacing: 12px;
+        SectionTitle { text: @tr("Albums"); }
+        AlbumFlow { albums: App.cp-album-list; playing-album: App.album-id; }
+    }
+    if App.cp-works.length > 0: VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 20px;
+        spacing: 8px;
+        HorizontalLayout { padding-left: 16px; SectionTitle { text: @tr("Works"); } }
+        // grouped by album: the first track of each carries its title
+        TrackTable { rows: App.cp-works; list: "composer"; show-album: false; header: false; }
+    }
+}
+
 // ------------------------------------------------------------------ favorites
 
 export component FavoritesPage inherits PageScroll {
@@ -1053,7 +1177,7 @@ export component SearchPage inherits PageScroll {
                 changed => { App.search-scope-changed(); }
             }
             Segmented {
-                options: [@tr("All"), @tr("Artists"), @tr("Tracks"), @tr("Albums"), @tr("Playlists")];
+                options: [@tr("All"), @tr("Artists"), @tr("Tracks"), @tr("Albums"), @tr("Playlists"), @tr("Composers")];
                 selected <=> App.search-kind;
             }
         }
@@ -1069,7 +1193,7 @@ export component SearchPage inherits PageScroll {
             color: Theme.text3;
             wrap: word-wrap;
         }
-        if App.search-text != "" && App.search-pending == "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0 && App.s-playlists.length == 0: EmptyState {
+        if App.search-text != "" && App.search-pending == "" && App.s-tracks.length == 0 && App.s-albums.length == 0 && App.s-artists.length == 0 && App.s-playlists.length == 0 && App.s-composers.length == 0: EmptyState {
             icon: Icons.search;
             title: @tr("No results");
             body: @tr("Nothing in your library matches. Check the spelling, or try fewer words.");
@@ -1094,6 +1218,26 @@ export component SearchPage inherits PageScroll {
                 }
             }
         }
+        if (App.search-kind == 0 || App.search-kind == 5) && App.s-composers.length > 0: VerticalLayout {
+            spacing: 8px;
+            padding-top: 8px;
+            SectionTitle { text: @tr("Composers"); }
+            Flickable {
+                height: 208px;
+                content-width: App.s-composers.length * 170px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    for a in App.s-composers: ArtistTile {
+                        size: 160px;
+                        cover: a.cover;
+                        name: a.name;
+                        subtitle: @tr("{n} album" | "{n} albums" % a.albums);
+                        open => { App.navigate(Page.composer, a.name); }
+                    }
+                }
+            }
+        }
         if (App.search-kind == 0 || App.search-kind == 2) && App.s-tracks.length > 0: VerticalLayout {
             spacing: 8px;
             padding-top: 8px;
@@ -1113,7 +1257,7 @@ export component SearchPage inherits PageScroll {
             SectionTitle { text: @tr("Playlists"); }
             AlbumFlow { albums: App.s-playlists; playing-album: ""; }
         }
-        if App.search-kind > 0 && App.search-text != "" && App.search-pending == "" && (App.search-kind == 1 ? App.s-artists.length : App.search-kind == 2 ? App.s-tracks.length : App.search-kind == 3 ? App.s-albums.length : App.s-playlists.length) == 0 && (App.s-tracks.length + App.s-albums.length + App.s-artists.length + App.s-playlists.length) > 0: Text {
+        if App.search-kind > 0 && App.search-text != "" && App.search-pending == "" && (App.search-kind == 1 ? App.s-artists.length : App.search-kind == 2 ? App.s-tracks.length : App.search-kind == 3 ? App.s-albums.length : App.search-kind == 4 ? App.s-playlists.length : App.s-composers.length) == 0 && (App.s-tracks.length + App.s-albums.length + App.s-artists.length + App.s-playlists.length + App.s-composers.length) > 0: Text {
             text: @tr("Nothing of this kind matches.");
             font-size: Theme.fs-md;
             color: Theme.text3;

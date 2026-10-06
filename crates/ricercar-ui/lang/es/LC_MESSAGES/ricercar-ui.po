@@ -97,6 +97,10 @@ msgid "Genres"
 msgstr "Géneros"
 
 msgctxt "Sidebar"
+msgid "Composers"
+msgstr "Compositores"
+
+msgctxt "Sidebar"
 msgid "Favorites"
 msgstr "Favoritos"
 
@@ -939,6 +943,10 @@ msgid "Start radio"
 msgstr "Iniciar radio"
 
 msgctxt "ContextMenu"
+msgid "Go to composer"
+msgstr "Ir al compositor"
+
+msgctxt "ContextMenu"
 msgid "Favorite / unfavorite"
 msgstr "Añadir / quitar de favoritos"
 
@@ -1284,6 +1292,44 @@ msgctxt "GenrePage"
 msgid "Shuffle"
 msgstr "Aleatorio"
 
+msgctxt "ComposersPage"
+msgid "Composers"
+msgstr "Compositores"
+
+msgctxt "ComposersPage"
+msgid "No composers"
+msgstr "No hay compositores"
+
+msgctxt "ComposersPage"
+msgid "Composers come from the COMPOSER tag of your files."
+msgstr "Los compositores vienen de la etiqueta COMPOSER de tus archivos."
+
+msgctxt "ComposersPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} álbum"
+msgstr[1] "{n} álbumes"
+
+msgctxt "ComposerPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} álbum"
+msgstr[1] "{n} álbumes"
+
+msgctxt "ComposerPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} canción"
+msgstr[1] "{n} canciones"
+
+msgctxt "ComposerPage"
+msgid "Albums"
+msgstr "Álbumes"
+
+msgctxt "ComposerPage"
+msgid "Works"
+msgstr "Obras"
+
 msgctxt "FavoritesPage"
 msgid "Favorites"
 msgstr "Favoritos"
@@ -1349,6 +1395,10 @@ msgstr "Álbumes"
 msgctxt "SearchPage"
 msgid "Playlists"
 msgstr "Playlists"
+
+msgctxt "SearchPage"
+msgid "Composers"
+msgstr "Compositores"
 
 msgctxt "SearchPage"
 msgid "Searching {}…"

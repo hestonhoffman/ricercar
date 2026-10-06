@@ -127,7 +127,7 @@ impl UiState {
     }
 }
 
-const PAGES: [(Page, &str); 15] = [
+const PAGES: [(Page, &str); 17] = [
     (Page::Home, "home"),
     (Page::Albums, "albums"),
     (Page::Album, "album"),
@@ -136,6 +136,8 @@ const PAGES: [(Page, &str); 15] = [
     (Page::Tracks, "tracks"),
     (Page::Genres, "genres"),
     (Page::Genre, "genre"),
+    (Page::Composers, "composers"),
+    (Page::Composer, "composer"),
     (Page::Favorites, "favorites"),
     (Page::Playlist, "playlist"),
     (Page::Radio, "radio"),
@@ -171,7 +173,7 @@ pub fn start_page(
         Page::Search | Page::Browse => false,
         Page::Album => album_exists(&arg),
         Page::Playlist => arg.parse().is_ok_and(&playlist_exists),
-        Page::Artist | Page::Genre => !arg.is_empty(),
+        Page::Artist | Page::Genre | Page::Composer => !arg.is_empty(),
         _ => true,
     };
     if ok {
@@ -307,6 +309,12 @@ mod tests {
         assert_eq!(start_page(&st("playlist", "8"), no, pl).0, Page::Home);
         assert_eq!(start_page(&st("search", ""), yes, pl).0, Page::Home);
         assert_eq!(start_page(&st("artist", ""), yes, pl).0, Page::Home);
+        assert_eq!(start_page(&st("composers", ""), no, pl).0, Page::Composers);
+        assert_eq!(
+            start_page(&st("composer", "Bach"), no, pl).0,
+            Page::Composer
+        );
+        assert_eq!(start_page(&st("composer", ""), yes, pl).0, Page::Home);
     }
 
     #[test]

@@ -202,6 +202,12 @@ export component Sidebar inherits Rectangle {
             clicked => { App.navigate(Page.genres, ""); }
         }
         NavItem {
+            icon: Icons.feather;
+            text: @tr("Composers");
+            active: App.page == Page.composers || App.page == Page.composer;
+            clicked => { App.navigate(Page.composers, ""); }
+        }
+        NavItem {
             icon: Icons.heart;
             text: @tr("Favorites");
             active: App.page == Page.favorites;
