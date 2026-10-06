@@ -285,6 +285,11 @@ export component MainWindow inherits Window {
         }
     }
 
+    // Below the dialogs it opens (sign-in, install, folder path).
+    if App.setup-open: SetupAssistant {
+        init => { self.focus(); }
+    }
+
     if App.install-open: Dialog {
         title: App.install-title;
         body: App.install-body;
@@ -327,10 +332,6 @@ export component MainWindow inherits Window {
     }
 
     if App.psettings-open: PluginSettingsDialog { }
-
-    if App.setup-open: SetupAssistant {
-        init => { self.focus(); }
-    }
 
     init => {
         Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;

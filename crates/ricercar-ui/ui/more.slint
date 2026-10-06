@@ -345,6 +345,14 @@ export component SettingsPage inherits PageScroll {
         }
 
         Group {
+            title: @tr("Setup assistant");
+            Row {
+                label: @tr("Language, music folders, plugins and audio output, step by step.");
+                Button { text: @tr("Open"); clicked => { App.setup-start(); } }
+            }
+        }
+
+        Group {
             title: @tr("Audio output");
             subtitle: @tr("Hardware devices (hw:) are opened exclusively: no mixer, no resampling, native sample rate for every track.");
             for d[i] in App.devices: VerticalLayout {
@@ -396,12 +404,6 @@ export component SettingsPage inherits PageScroll {
                 label: @tr("Rescan devices");
                 hint: @tr("After plugging in a USB DAC.");
                 Button { text: @tr("Refresh"); icon: Icons.refresh-cw; clicked => { App.refresh-devices(); } }
-            }
-            Divider { }
-            Row {
-                label: @tr("Audio setup");
-                hint: @tr("Choose the output, check the DAC and the volume mode, step by step.");
-                Button { text: @tr("Open"); clicked => { App.setup-start(); } }
             }
             Divider { }
             Row {

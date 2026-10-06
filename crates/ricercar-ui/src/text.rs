@@ -69,7 +69,7 @@ pub fn language() -> &'static str {
 }
 
 /// Position of the `[ui] language` setting in the language menus (Settings,
-/// audio setup): 0 is "System" (empty), then `LANGUAGES` in order.
+/// setup assistant): 0 is "System" (empty), then `LANGUAGES` in order.
 pub fn language_index(pref: &str) -> i32 {
     LANGUAGES
         .iter()

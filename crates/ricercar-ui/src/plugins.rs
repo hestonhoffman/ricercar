@@ -264,6 +264,7 @@ pub fn poll(ui: &Rc<Ui>) {
     crate::plugin_settings::refresh(ui);
     refresh_sections(ui, &statuses);
     refresh_search_scopes(ui, &statuses);
+    crate::setup::refresh_plugins(ui);
     let open = ui.plugins.borrow().signin.clone();
     if let Some(id) = open
         && statuses.iter().any(|s| s.id == id && s.signed_in())
@@ -274,7 +275,7 @@ pub fn poll(ui: &Rc<Ui>) {
     }
 }
 
-fn status_text(s: &PluginStatus) -> (String, i32) {
+pub(crate) fn status_text(s: &PluginStatus) -> (String, i32) {
     match &s.state {
         RunState::Disabled => (t("Off").into(), 0),
         RunState::Starting => (t("Starting…").into(), 1),
@@ -2381,7 +2382,7 @@ fn artist_albums(ui: &Ui, id: String, pname: String, name: String, reference: Op
 
 /// Hub index to read, and whether local files are allowed (only for an
 /// index given by the tour or `RICERCAR_PLUGIN_INDEX`).
-fn index_source(ui: &Ui) -> (String, bool) {
+pub(crate) fn index_source(ui: &Ui) -> (String, bool) {
     if let Some(o) = ui.plugins.borrow().index_override.clone() {
         return (o, true);
     }
@@ -2392,7 +2393,7 @@ fn index_source(ui: &Ui) -> (String, bool) {
 }
 
 /// Other indexes the user added (none while the tour reads its own).
-fn other_indexes(ui: &Ui) -> Vec<String> {
+pub(crate) fn other_indexes(ui: &Ui) -> Vec<String> {
     if ui.plugins.borrow().index_override.is_some() {
         return Vec::new();
     }
@@ -2614,17 +2615,9 @@ pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
         }
     }
     let Some(e) = entry(ui, id) else { return };
-    let Some(asset) = e.asset_for(catalog::current_arch()) else {
+    let Some(host_name) = download_host(&e) else {
         return;
     };
-    let host_name = asset
-        .url
-        .split("://")
-        .nth(1)
-        .and_then(|r| r.split('/').next())
-        .filter(|h| !h.is_empty())
-        .unwrap_or(t("this computer"))
-        .to_string();
     let app = ui.app();
     app.set_install_title(
         if update {
@@ -2634,8 +2627,7 @@ pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
         }
         .into(),
     );
-    let mut body =
-        crate::text::install_body(&e.name, &e.version, &e.author, &host_name, &e.repository);
+    let mut body = install_text(&e, &host_name);
     // An update from somewhere else than the installed binary: say so first.
     if update {
         let installed = ui
@@ -2655,6 +2647,30 @@ pub fn confirm_install(ui: &Ui, id: &str, update: bool) {
         }
     }
     ask(ui, Pending::Entry(e), body, "");
+}
+
+/// Where the binary of `e` for this computer is downloaded from (its
+/// host), if there is one.
+fn download_host(e: &catalog::Entry) -> Option<String> {
+    let asset = e.asset_for(catalog::current_arch())?;
+    let host = asset
+        .url
+        .split("://")
+        .nth(1)
+        .and_then(|r| r.split('/').next())
+        .filter(|h| !h.is_empty())
+        .unwrap_or(t("this computer"));
+    Some(host.to_string())
+}
+
+fn install_text(e: &catalog::Entry, host: &str) -> String {
+    crate::text::install_body(&e.name, &e.version, &e.author, host, &e.repository)
+}
+
+/// What the install confirmation says about a catalogue entry: what is
+/// downloaded, from where, and its source. None without a binary here.
+pub(crate) fn entry_body(e: &catalog::Entry) -> Option<String> {
+    download_host(e).map(|h| install_text(e, &h))
 }
 
 /// Open the install dialog about `p` (its title already set).
@@ -2825,7 +2841,7 @@ fn close_install(ui: &Ui) {
 
 /// Add an installed plugin's declaration, or replace the one with its id
 /// (an update keeps the user's settings).
-fn declare(ui: &Ui, cfg: ricercar_core::config::PluginConfig) {
+pub(crate) fn declare(ui: &Ui, cfg: ricercar_core::config::PluginConfig) {
     ui.ctx
         .update_config(|c| match c.plugins.iter_mut().find(|p| p.id == cfg.id) {
             Some(p) => {

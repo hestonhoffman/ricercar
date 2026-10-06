@@ -374,6 +374,18 @@ msgid "Settings"
 msgstr "設定"
 
 msgctxt "SettingsPage"
+msgid "Setup assistant"
+msgstr "セットアップアシスタント"
+
+msgctxt "SettingsPage"
+msgid "Language, music folders, plugins and audio output, step by step."
+msgstr "言語、音楽フォルダ、プラグイン、オーディオ出力を順に設定します。"
+
+msgctxt "SettingsPage"
+msgid "Open"
+msgstr "開く"
+
+msgctxt "SettingsPage"
 msgid "Audio output"
 msgstr "オーディオ出力"
 
@@ -412,18 +424,6 @@ msgstr "USB DAC を接続したあとに。"
 msgctxt "SettingsPage"
 msgid "Refresh"
 msgstr "更新"
-
-msgctxt "SettingsPage"
-msgid "Audio setup"
-msgstr "オーディオ設定ガイド"
-
-msgctxt "SettingsPage"
-msgid "Choose the output, check the DAC and the volume mode, step by step."
-msgstr "出力の選択、DAC の確認、音量モードの設定を順に行います。"
-
-msgctxt "SettingsPage"
-msgid "Open"
-msgstr "開く"
 
 msgctxt "SettingsPage"
 msgid "ReplayGain"
@@ -1561,13 +1561,33 @@ msgctxt "SetupOutput"
 msgid "NOT CONNECTED"
 msgstr "未接続"
 
+msgctxt "SetupFolder"
+msgid "Remove folder"
+msgstr "フォルダを削除"
+
+msgctxt "SetupPluginLine"
+msgid "Sign in"
+msgstr "サインイン"
+
 msgctxt "SetupAssistant"
-msgid "Audio setup · step {} of {}"
-msgstr "オーディオ設定ガイド · ステップ {}/{}"
+msgid "Setup · step {} of {}"
+msgstr "セットアップ · ステップ {} / {}"
 
 msgctxt "SetupAssistant"
 msgid "Language"
 msgstr "言語"
+
+msgctxt "SetupAssistant"
+msgid "Music folders"
+msgstr "音楽フォルダ"
+
+msgctxt "SetupAssistant"
+msgid "Install these plugins?"
+msgstr "これらのプラグインをインストールしますか？"
+
+msgctxt "SetupAssistant"
+msgid "Plugins"
+msgstr "プラグイン"
 
 msgctxt "SetupAssistant"
 msgid "Choose the output"
@@ -1588,6 +1608,30 @@ msgstr "準備完了"
 msgctxt "SetupAssistant"
 msgid "The interface switches at once. “System” follows the language of your desktop."
 msgstr "表示言語はすぐに切り替わります。「システム」はデスクトップの言語に従います。"
+
+msgctxt "SetupAssistant"
+msgid "ricercar indexes the music in these folders; files are only read, never modified. The list can stay empty if you only play from plugins or from other apps."
+msgstr "ricercar はこれらのフォルダの音楽をインデックスします。ファイルは読み取るだけで、変更しません。プラグインや他のアプリからだけ再生する場合は、空のままでかまいません。"
+
+msgctxt "SetupAssistant"
+msgid "No music folder yet"
+msgstr "音楽フォルダはまだありません"
+
+msgctxt "SetupAssistant"
+msgid "Add folder"
+msgstr "フォルダを追加"
+
+msgctxt "SetupAssistant"
+msgid "Plugins add music from other sources. Each one is a separate program from its author, running with your permissions. Nothing is downloaded before you confirm."
+msgstr "プラグインは他のソースから音楽を追加します。それぞれ作者による別のプログラムで、あなたの権限で動作します。確認するまで何もダウンロードしません。"
+
+msgctxt "SetupAssistant"
+msgid "Plugins that need an account can be signed in now, or later from the Plugins page."
+msgstr "アカウントが必要なプラグインは、今すぐ、または後でプラグインのページからサインインできます。"
+
+msgctxt "SetupAssistant"
+msgid "Loading the catalogue…"
+msgstr "カタログを読み込み中…"
 
 msgctxt "SetupAssistant"
 msgid "Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample."
@@ -1618,24 +1662,8 @@ msgid "Fixed volume (bit-perfect)"
 msgstr "音量固定（bit-perfect）"
 
 msgctxt "SetupAssistant"
-msgid "Output"
-msgstr "出力"
-
-msgctxt "SetupAssistant"
-msgid "Fixed volume"
-msgstr "音量固定"
-
-msgctxt "SetupAssistant"
-msgid "On"
-msgstr "オン"
-
-msgctxt "SetupAssistant"
-msgid "Off"
-msgstr "オフ"
-
-msgctxt "SetupAssistant"
-msgid "You can change these later in Settings → Audio output."
-msgstr "あとで 設定 → オーディオ出力 から変更できます。"
+msgid "You can change all of this later in Settings."
+msgstr "これらはすべて後で設定から変更できます。"
 
 msgctxt "SetupAssistant"
 msgid "Later"
@@ -1644,6 +1672,10 @@ msgstr "後で"
 msgctxt "SetupAssistant"
 msgid "Back"
 msgstr "戻る"
+
+msgctxt "SetupAssistant"
+msgid "Install"
+msgstr "インストール"
 
 msgctxt "SetupAssistant"
 msgid "Next"

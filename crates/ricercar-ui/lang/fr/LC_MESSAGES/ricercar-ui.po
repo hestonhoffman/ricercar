@@ -375,6 +375,18 @@ msgid "Settings"
 msgstr "Réglages"
 
 msgctxt "SettingsPage"
+msgid "Setup assistant"
+msgstr "Assistant de configuration"
+
+msgctxt "SettingsPage"
+msgid "Language, music folders, plugins and audio output, step by step."
+msgstr "Langue, dossiers de musique, plugins et sortie audio, pas à pas."
+
+msgctxt "SettingsPage"
+msgid "Open"
+msgstr "Ouvrir"
+
+msgctxt "SettingsPage"
 msgid "Audio output"
 msgstr "Sortie audio"
 
@@ -413,18 +425,6 @@ msgstr "Après avoir branché un DAC USB."
 msgctxt "SettingsPage"
 msgid "Refresh"
 msgstr "Actualiser"
-
-msgctxt "SettingsPage"
-msgid "Audio setup"
-msgstr "Configuration audio"
-
-msgctxt "SettingsPage"
-msgid "Choose the output, check the DAC and the volume mode, step by step."
-msgstr "Choisir la sortie, vérifier le DAC et le mode de volume, pas à pas."
-
-msgctxt "SettingsPage"
-msgid "Open"
-msgstr "Ouvrir"
 
 msgctxt "SettingsPage"
 msgid "ReplayGain"
@@ -1574,13 +1574,33 @@ msgctxt "SetupOutput"
 msgid "NOT CONNECTED"
 msgstr "NON CONNECTÉ"
 
+msgctxt "SetupFolder"
+msgid "Remove folder"
+msgstr "Retirer le dossier"
+
+msgctxt "SetupPluginLine"
+msgid "Sign in"
+msgstr "Se connecter"
+
 msgctxt "SetupAssistant"
-msgid "Audio setup · step {} of {}"
-msgstr "Configuration audio · étape {} sur {}"
+msgid "Setup · step {} of {}"
+msgstr "Configuration · étape {} sur {}"
 
 msgctxt "SetupAssistant"
 msgid "Language"
 msgstr "Langue"
+
+msgctxt "SetupAssistant"
+msgid "Music folders"
+msgstr "Dossiers de musique"
+
+msgctxt "SetupAssistant"
+msgid "Install these plugins?"
+msgstr "Installer ces plugins ?"
+
+msgctxt "SetupAssistant"
+msgid "Plugins"
+msgstr "Plugins"
 
 msgctxt "SetupAssistant"
 msgid "Choose the output"
@@ -1601,6 +1621,30 @@ msgstr "Prêt"
 msgctxt "SetupAssistant"
 msgid "The interface switches at once. “System” follows the language of your desktop."
 msgstr "L'interface change aussitôt. « Système » suit la langue de votre bureau."
+
+msgctxt "SetupAssistant"
+msgid "ricercar indexes the music in these folders; files are only read, never modified. The list can stay empty if you only play from plugins or from other apps."
+msgstr "ricercar indexe la musique de ces dossiers ; les fichiers sont seulement lus, jamais modifiés. La liste peut rester vide si vous n'écoutez que des plugins ou depuis d'autres applications."
+
+msgctxt "SetupAssistant"
+msgid "No music folder yet"
+msgstr "Aucun dossier de musique"
+
+msgctxt "SetupAssistant"
+msgid "Add folder"
+msgstr "Ajouter un dossier"
+
+msgctxt "SetupAssistant"
+msgid "Plugins add music from other sources. Each one is a separate program from its author, running with your permissions. Nothing is downloaded before you confirm."
+msgstr "Les plugins ajoutent de la musique d'autres sources. Chacun est un programme distinct de son auteur, exécuté avec vos droits. Rien n'est téléchargé avant votre confirmation."
+
+msgctxt "SetupAssistant"
+msgid "Plugins that need an account can be signed in now, or later from the Plugins page."
+msgstr "Les plugins qui demandent un compte peuvent être connectés maintenant, ou plus tard depuis la page Plugins."
+
+msgctxt "SetupAssistant"
+msgid "Loading the catalogue…"
+msgstr "Chargement du catalogue…"
 
 msgctxt "SetupAssistant"
 msgid "Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample."
@@ -1631,24 +1675,8 @@ msgid "Fixed volume (bit-perfect)"
 msgstr "Volume fixe (bit-perfect)"
 
 msgctxt "SetupAssistant"
-msgid "Output"
-msgstr "Sortie"
-
-msgctxt "SetupAssistant"
-msgid "Fixed volume"
-msgstr "Volume fixe"
-
-msgctxt "SetupAssistant"
-msgid "On"
-msgstr "Activé"
-
-msgctxt "SetupAssistant"
-msgid "Off"
-msgstr "Désactivé"
-
-msgctxt "SetupAssistant"
-msgid "You can change these later in Settings → Audio output."
-msgstr "Vous pourrez les modifier dans Réglages → Sortie audio."
+msgid "You can change all of this later in Settings."
+msgstr "Vous pourrez tout modifier plus tard dans les Réglages."
 
 msgctxt "SetupAssistant"
 msgid "Later"
@@ -1657,6 +1685,10 @@ msgstr "Plus tard"
 msgctxt "SetupAssistant"
 msgid "Back"
 msgstr "Retour"
+
+msgctxt "SetupAssistant"
+msgid "Install"
+msgstr "Installer"
 
 msgctxt "SetupAssistant"
 msgid "Next"

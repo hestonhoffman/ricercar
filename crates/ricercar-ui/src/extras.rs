@@ -477,6 +477,33 @@ pub(crate) fn file_chooser_available() -> bool {
     .is_ok()
 }
 
+/// Ask for a music folder with the portal's folder picker, then `done`;
+/// without a picker, the dialog where the path is typed.
+pub(crate) fn pick_folder(done: fn(&Ui, std::path::PathBuf)) {
+    std::thread::spawn(move || {
+        let picker = file_chooser_available();
+        let asked = std::time::Instant::now();
+        let dir = if picker {
+            rfd::FileDialog::new().pick_folder()
+        } else {
+            None
+        };
+        match dir {
+            Some(dir) => post(move |ui| done(ui, dir)),
+            // rfd answers "nothing picked" at once when the portal
+            // fails; nobody cancels a real dialog that fast.
+            None if !picker || asked.elapsed() < std::time::Duration::from_millis(400) => {
+                post(|ui| {
+                    let app = ui.app();
+                    app.set_root_path(SharedString::new());
+                    app.set_root_path_open(true);
+                })
+            }
+            None => {}
+        }
+    });
+}
+
 /// A typed folder path: `~` expanded, must be an existing directory.
 fn typed_folder(typed: &str) -> Option<std::path::PathBuf> {
     let typed = typed.trim();
@@ -753,7 +780,7 @@ pub fn apply_theme(ui: &Ui) {
 
 /// Switch to the language of the config, live: the .slint side switches at
 /// once; strings built on the Rust side come back with the page and the
-/// settings (which also refill the audio setup).
+/// settings (which also refill the setup assistant).
 pub fn apply_language(ui: &Rc<Ui>) {
     let lang = ui.ctx.config.read().unwrap().ui.language.clone();
     let before = crate::text::language();
@@ -892,7 +919,7 @@ fn lastfm_finish(ui: &Rc<Ui>) {
 
 // ------------------------------------------------------------------ wiring
 
-/// Play on `name` from now on (settings list, audio setup).
+/// Play on `name` from now on (settings list, setup assistant).
 pub fn select_device(ui: &Ui, name: &str) {
     let desc = ui
         .app()
@@ -978,35 +1005,17 @@ pub fn wire(ui: &Rc<Ui>) {
             refresh_devices(ui);
         })
     });
-    app.on_add_root(|| {
-        std::thread::spawn(|| {
-            let picker = file_chooser_available();
-            let asked = std::time::Instant::now();
-            let dir = if picker {
-                rfd::FileDialog::new().pick_folder()
-            } else {
-                None
-            };
-            match dir {
-                Some(dir) => post(move |ui| add_root(ui, dir)),
-                // rfd answers "nothing picked" at once when the portal
-                // fails; nobody cancels a real dialog that fast.
-                None if !picker || asked.elapsed() < std::time::Duration::from_millis(400) => {
-                    post(|ui| {
-                        let app = ui.app();
-                        app.set_root_path(SharedString::new());
-                        app.set_root_path_open(true);
-                    })
-                }
-                None => {}
-            }
-        });
-    });
+    app.on_add_root(|| pick_folder(add_root));
     app.on_add_root_path(|typed| {
         with_ui(|ui| match typed_folder(typed.as_str()) {
             Some(dir) => {
                 ui.app().set_root_path_open(false);
-                add_root(ui, dir);
+                // The setup assistant asked for it.
+                if ui.app().get_setup_open() {
+                    crate::setup::add_folder(ui, dir);
+                } else {
+                    add_root(ui, dir);
+                }
             }
             None => ui.toast(t("This folder does not exist."), true),
         })

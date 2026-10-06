@@ -1,9 +1,10 @@
 import { Theme } from "theme.slint";
-import { App, DeviceRow } from "state.slint";
-import { Button, Badge, Toggle } from "widgets.slint";
+import { App, DeviceRow, SetupPlugin } from "state.slint";
+import { Button, Badge, Toggle, IconButton, Spinner } from "widgets.slint";
+import { Icons } from "icons.slint";
 import { CapLine } from "more.slint";
 
-// ------------------------------------------------------------------ audio setup
+// ------------------------------------------------------------------ setup assistant
 
 component SetupRadio inherits Rectangle {
     in property <bool> checked;
@@ -68,6 +69,51 @@ component SetupOutput inherits Rectangle {
     }
 }
 
+component SetupFolder inherits HorizontalLayout {
+    in property <string> path;
+    in property <int> index;
+    spacing: 12px;
+    padding-left: 12px;
+    height: 40px;
+    Text { text: path; font-size: Theme.fs-md; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+    IconButton {
+        y: (parent.height - self.height) / 2;
+        icon: Icons.x;
+        tooltip: @tr("Remove folder");
+        clicked => { App.setup-remove-folder(index); }
+    }
+}
+
+// A catalogue plugin: name, description, status, tick and sign-in.
+component SetupPluginLine inherits HorizontalLayout {
+    in property <SetupPlugin> plugin;
+    in property <bool> choosing;
+    in property <length> text-width;
+    spacing: 12px;
+    padding-left: 12px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    VerticalLayout {
+        spacing: 2px;
+        horizontal-stretch: 1;
+        Text { text: plugin.name; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
+        if plugin.description != "": Text { text: plugin.description; font-size: Theme.fs-sm; color: Theme.text2; wrap: word-wrap; width: text-width; }
+        if plugin.status != "": Text { text: plugin.status; font-size: Theme.fs-sm; color: plugin.failed ? Theme.warn : Theme.text3; wrap: word-wrap; width: text-width; }
+    }
+    if plugin.can-sign-in: Button {
+        y: (parent.height - self.height) / 2;
+        text: @tr("Sign in");
+        clicked => { App.plugin-sign-in(plugin.id); }
+    }
+    if choosing: Toggle {
+        y: (parent.height - self.height) / 2;
+        label: plugin.name;
+        checked: plugin.checked;
+        enabled: !plugin.installed;
+        toggled(on) => { App.setup-plugin-check(plugin.id, on); }
+    }
+}
+
 component SetupHeading inherits Text {
     font-size: Theme.fs-sm;
     font-weight: 700;
@@ -76,14 +122,24 @@ component SetupHeading inherits Text {
     vertical-alignment: bottom;
 }
 
-/// First-run audio setup (setup.rs): language, output, DAC, volume,
-/// summary. The language applies at once; the rest at Save. Later (or
+/// Setup assistant (setup.rs): language, music folders, plugins, output,
+/// DAC, volume, summary. The language applies at once, plugins when
+/// leaving their step (after a confirmation), the rest at Save. Later (or
 /// Escape) closes it for good.
 export component SetupAssistant inherits Rectangle {
     // Wrapped text gets this width explicitly: its height then covers
     // every line.
     private property <length> body-width: 520px;
     private property <int> step: App.setup-step;
+    private property <int> phase: App.setup-plugins-phase;
+    // Lists scroll within the window.
+    private property <length> list-max: root.height - 340px;
+    // The sign-in, install or folder dialogs open above it: the keyboard
+    // comes back here when they close.
+    private property <bool> covered: App.signin-open || App.root-path-open || App.install-open;
+    changed covered => {
+        if !covered { keys.focus(); }
+    }
     background: Theme.scrim;
     forward-focus: keys;
     keys := FocusScope {
@@ -108,9 +164,9 @@ export component SetupAssistant inherits Rectangle {
             lay := VerticalLayout {
                 padding: 24px;
                 spacing: 12px;
-                Text { text: @tr("Audio setup · step {} of {}", step + 1, 5); font-size: Theme.fs-sm; color: Theme.text3; }
+                Text { text: @tr("Setup · step {} of {}", step + 1, 7); font-size: Theme.fs-sm; color: Theme.text3; }
                 Text {
-                    text: step == 0 ? @tr("Language") : step == 1 ? @tr("Choose the output") : step == 2 ? @tr("Check the DAC") : step == 3 ? @tr("Volume") : @tr("Ready");
+                    text: step == 0 ? @tr("Language") : step == 1 ? @tr("Music folders") : step == 2 ? (phase == 1 ? @tr("Install these plugins?") : @tr("Plugins")) : step == 3 ? @tr("Choose the output") : step == 4 ? @tr("Check the DAC") : step == 5 ? @tr("Volume") : @tr("Ready");
                     font-size: Theme.fs-xl;
                     font-weight: 700;
                     color: Theme.text;
@@ -132,14 +188,83 @@ export component SetupAssistant inherits Rectangle {
                 }
 
                 if step == 1: Text {
+                    text: @tr("ricercar indexes the music in these folders; files are only read, never modified. The list can stay empty if you only play from plugins or from other apps.");
+                    font-size: Theme.fs-md;
+                    color: Theme.text2;
+                    wrap: word-wrap;
+                    width: root.body-width;
+                }
+                if step == 1: ffl := Flickable {
+                    height: min(folders.preferred-height, root.list-max);
+                    content-height: folders.preferred-height;
+                    folders := VerticalLayout {
+                        width: ffl.width;
+                        for f[i] in App.setup-folders: SetupFolder { path: f; index: i; }
+                        if App.setup-folders.length == 0: Text { text: @tr("No music folder yet"); font-size: Theme.fs-md; color: Theme.text3; height: 40px; vertical-alignment: center; }
+                    }
+                }
+                if step == 1: HorizontalLayout {
+                    alignment: start;
+                    Button { text: @tr("Add folder"); icon: Icons.folder-open; clicked => { App.setup-add-folder(); } }
+                }
+
+                if step == 2 && phase == 0: Text {
+                    text: @tr("Plugins add music from other sources. Each one is a separate program from its author, running with your permissions. Nothing is downloaded before you confirm.");
+                    font-size: Theme.fs-md;
+                    color: Theme.text2;
+                    wrap: word-wrap;
+                    width: root.body-width;
+                }
+                if step == 2 && phase == 2: Text {
+                    text: @tr("Plugins that need an account can be signed in now, or later from the Plugins page.");
+                    font-size: Theme.fs-md;
+                    color: Theme.text2;
+                    wrap: word-wrap;
+                    width: root.body-width;
+                }
+                if step == 2 && phase == 0 && App.setup-plugins-loading: HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Spinner { y: (parent.height - self.height) / 2; }
+                    Text { text: @tr("Loading the catalogue…"); font-size: Theme.fs-md; color: Theme.text2; vertical-alignment: center; }
+                }
+                if step == 2 && phase == 0 && App.setup-plugins-status != "": Text {
+                    text: App.setup-plugins-status;
+                    font-size: Theme.fs-md;
+                    color: Theme.text3;
+                    wrap: word-wrap;
+                    width: root.body-width;
+                }
+                if step == 2 && phase != 1: pfl := Flickable {
+                    height: min(plugins.preferred-height, root.list-max);
+                    content-height: plugins.preferred-height;
+                    plugins := VerticalLayout {
+                        width: pfl.width;
+                        for p in App.setup-plugins: SetupPluginLine {
+                            plugin: p;
+                            choosing: phase == 0;
+                            text-width: root.body-width - 160px;
+                        }
+                    }
+                }
+                if step == 2 && phase == 1: cfl := Flickable {
+                    height: min(confirm.preferred-height, root.list-max);
+                    content-height: confirm.preferred-height;
+                    confirm := VerticalLayout {
+                        width: cfl.width;
+                        Text { text: App.setup-plugins-confirm; font-size: Theme.fs-md; color: Theme.text; wrap: word-wrap; width: root.body-width; }
+                    }
+                }
+
+                if step == 3: Text {
                     text: @tr("Hardware outputs (hw:) send the music to the DAC untouched, at each track's own rate. The default and PipeWire outputs go through the system mixer, which may resample.");
                     font-size: Theme.fs-md;
                     color: Theme.text2;
                     wrap: word-wrap;
                     width: root.body-width;
                 }
-                if step == 1: fl := Flickable {
-                    height: min(list.preferred-height, root.height - 320px);
+                if step == 3: fl := Flickable {
+                    height: min(list.preferred-height, root.list-max);
                     content-height: list.preferred-height;
                     list := VerticalLayout {
                         width: fl.width;
@@ -151,7 +276,7 @@ export component SetupAssistant inherits Rectangle {
                     }
                 }
 
-                if step == 2: VerticalLayout {
+                if step == 4: VerticalLayout {
                     spacing: 10px;
                     Text { text: App.setup-dev.desc; font-size: Theme.fs-md; font-weight: 600; color: Theme.text; overflow: elide; }
                     if App.setup-dev.caps-status != "": Text { text: App.setup-dev.caps-status; font-size: Theme.fs-sm; color: Theme.text3; wrap: word-wrap; width: root.body-width; }
@@ -161,7 +286,7 @@ export component SetupAssistant inherits Rectangle {
                     if App.setup-note != "": Text { text: App.setup-note; font-size: Theme.fs-md; color: Theme.text2; wrap: word-wrap; width: root.body-width; }
                 }
 
-                if step == 3: VerticalLayout {
+                if step == 5: VerticalLayout {
                     spacing: 14px;
                     Text {
                         text: @tr("With fixed volume, ricercar always plays at 100 % and ignores volume changes, so the samples reach the DAC untouched. You then set the volume on your DAC or amplifier: turn it down before the first track.");
@@ -177,20 +302,15 @@ export component SetupAssistant inherits Rectangle {
                     }
                 }
 
-                if step == 4: VerticalLayout {
+                if step == 6: VerticalLayout {
                     spacing: 8px;
-                    HorizontalLayout {
+                    for l in App.setup-summary: HorizontalLayout {
                         spacing: 12px;
-                        Text { width: 130px; text: @tr("Output"); font-size: Theme.fs-md; color: Theme.text3; }
-                        Text { text: App.setup-dev.desc + " (" + App.setup-dev.name + ")"; font-size: Theme.fs-md; color: Theme.text; overflow: elide; }
-                    }
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Text { width: 130px; text: @tr("Fixed volume"); font-size: Theme.fs-md; color: Theme.text3; }
-                        Text { text: App.setup-fixed ? @tr("On") : @tr("Off"); font-size: Theme.fs-md; color: Theme.text; }
+                        Text { width: 130px; text: l.label; font-size: Theme.fs-md; color: Theme.text3; }
+                        Text { text: l.value; font-size: Theme.fs-md; color: Theme.text; wrap: word-wrap; width: root.body-width - 142px; }
                     }
                     Text {
-                        text: @tr("You can change these later in Settings → Audio output.");
+                        text: @tr("You can change all of this later in Settings.");
                         font-size: Theme.fs-sm;
                         color: Theme.text2;
                         wrap: word-wrap;
@@ -203,14 +323,18 @@ export component SetupAssistant inherits Rectangle {
                     padding-top: 6px;
                     Button { text: @tr("Later"); clicked => { App.setup-skip(); } }
                     Rectangle { horizontal-stretch: 1; }
-                    if step > 0: Button { text: @tr("Back"); clicked => { App.setup-step = step - 1; } }
-                    if step < 4: Button {
-                        text: @tr("Next");
-                        primary: true;
-                        enabled: step != 1 || App.setup-dev.name != "";
-                        clicked => { App.setup-step = step + 1; }
+                    if step > 0: Button {
+                        text: @tr("Back");
+                        enabled: step != 2 || !App.setup-plugins-busy;
+                        clicked => { App.setup-back(); }
                     }
-                    if step == 4: Button { text: @tr("Save"); primary: true; clicked => { App.setup-finish(); } }
+                    if step < 6: Button {
+                        text: step == 2 && phase == 1 ? @tr("Install") : @tr("Next");
+                        primary: true;
+                        enabled: (step != 3 || App.setup-dev.name != "") && (step != 2 || !App.setup-plugins-busy);
+                        clicked => { App.setup-next(); }
+                    }
+                    if step == 6: Button { text: @tr("Save"); primary: true; clicked => { App.setup-finish(); } }
                 }
             }
         }

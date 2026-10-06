@@ -180,6 +180,27 @@ export struct CatalogRow {
     state: int,
 }
 
+// A plugin offered by the setup assistant (setup.rs), from the catalogue.
+export struct SetupPlugin {
+    id: string,
+    name: string,
+    description: string,
+    // installed before or by the assistant: shown checked, not editable
+    installed: bool,
+    checked: bool,
+    // "Installing…", "Signed in", "Not signed in", the install error…
+    status: string,
+    failed: bool,
+    // needs a sign-in it does not have yet, and is running
+    can-sign-in: bool,
+}
+
+// A line of the setup summary.
+export struct SetupLine {
+    label: string,
+    value: string,
+}
+
 // Sidebar entry of a signed-in plugin: a header (its name) or a section.
 export struct PluginNav {
     header: bool,
@@ -526,9 +547,19 @@ export global App {
     callback refresh-devices();
     callback toggle-device-caps(string);
     callback set-device-dsd(string, int); // device, 0 pcm / 1 dop / 2 native
-    // audio setup assistant (setup.rs)
+    // setup assistant (setup.rs)
     in-out property <bool> setup-open;
-    in-out property <int> setup-step; // 0 language, 1 output, 2 DAC, 3 volume, 4 done
+    // 0 language, 1 library, 2 plugins, 3 output, 4 DAC, 5 volume, 6 summary
+    in property <int> setup-step;
+    in property <[string]> setup-folders;
+    in property <[SetupPlugin]> setup-plugins;
+    in property <bool> setup-plugins-loading;
+    in property <string> setup-plugins-status; // offline, catalogue off, empty
+    // plugins step: 0 choose, 1 confirm the downloads, 2 installing / done
+    in property <int> setup-plugins-phase;
+    in property <string> setup-plugins-confirm; // what will be installed, from where
+    in property <bool> setup-plugins-busy;
+    in property <[SetupLine]> setup-summary;
     in property <[DeviceRow]> setup-outputs; // hardware first
     in property <DeviceRow> setup-dev; // the chosen one, with its capabilities
     in property <string> setup-verdict; // "Plays up to 192 kHz / 32-bit natively"
@@ -537,6 +568,11 @@ export global App {
     callback setup-start();
     callback setup-language(int); // index in language-names
     callback setup-pick(string);
+    callback setup-add-folder();
+    callback setup-remove-folder(int);
+    callback setup-plugin-check(string, bool);
+    callback setup-next();
+    callback setup-back();
     callback setup-skip();
     callback setup-finish();
     in-out property <int> replaygain; // 0 off, 1 track, 2 album, 3 auto
