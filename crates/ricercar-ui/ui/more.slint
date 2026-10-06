@@ -28,7 +28,7 @@ component CapChipView inherits Rectangle {
     }
 }
 
-component CapLine inherits HorizontalLayout {
+export component CapLine inherits HorizontalLayout {
     in property <string> label;
     in property <[CapChip]> chips;
     spacing: 6px;
@@ -396,6 +396,12 @@ export component SettingsPage inherits PageScroll {
                 label: @tr("Rescan devices");
                 hint: @tr("After plugging in a USB DAC.");
                 Button { text: @tr("Refresh"); icon: Icons.refresh-cw; clicked => { App.refresh-devices(); } }
+            }
+            Divider { }
+            Row {
+                label: @tr("Audio setup");
+                hint: @tr("Choose the output, check the DAC and the volume mode, step by step.");
+                Button { text: @tr("Open"); clicked => { App.setup-start(); } }
             }
             Divider { }
             Row {

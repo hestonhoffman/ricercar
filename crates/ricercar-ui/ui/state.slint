@@ -509,6 +509,18 @@ export global App {
     callback refresh-devices();
     callback toggle-device-caps(string);
     callback set-device-dsd(string, int); // device, 0 pcm / 1 dop / 2 native
+    // audio setup assistant (setup.rs)
+    in-out property <bool> setup-open;
+    in-out property <int> setup-step; // 0 output, 1 DAC, 2 volume, 3 done
+    in property <[DeviceRow]> setup-outputs; // hardware first
+    in property <DeviceRow> setup-dev; // the chosen one, with its capabilities
+    in property <string> setup-verdict; // "Plays up to 192 kHz / 32-bit natively"
+    in property <string> setup-note; // shared output, unreadable device
+    in-out property <bool> setup-fixed;
+    callback setup-start();
+    callback setup-pick(string);
+    callback setup-skip();
+    callback setup-finish();
     in-out property <int> replaygain; // 0 off, 1 track, 2 album, 3 auto
     in-out property <float> preamp;
     callback settings-changed();
