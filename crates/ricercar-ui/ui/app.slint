@@ -4,7 +4,7 @@ import { Icons } from "icons.slint";
 import { App, Page } from "state.slint";
 import { TrackMenu } from "lists.slint";
 import { Sidebar, PlayerBar, ChainPanel } from "chrome.slint";
-import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, GenresPage, GenrePage, FavoritesPage, PlaylistPage, SearchPage } from "pages.slint";
+import { HomePage, AlbumsPage, AlbumPage, ArtistsPage, ArtistPage, TracksPage, GenresPage, GenrePage, ComposersPage, ComposerPage, FavoritesPage, PlaylistPage, SearchPage } from "pages.slint";
 import { RadioPage, SettingsPage } from "more.slint";
 import { QueuePanel, NowPlayingView, ContextMenu, Dialog, Toast } from "overlays.slint";
 import { BrowsePage, SignInDialog, PluginSettingsDialog, PluginsPage } from "plugins.slint";
@@ -176,6 +176,8 @@ export component MainWindow inherits Window {
                     if App.page == Page.tracks: TracksPage { }
                     if App.page == Page.genres: GenresPage { }
                     if App.page == Page.genre: GenrePage { }
+                    if App.page == Page.composers: ComposersPage { }
+                    if App.page == Page.composer: ComposerPage { }
                     if App.page == Page.favorites: FavoritesPage { }
                     if App.page == Page.playlist: PlaylistPage { }
                     if App.page == Page.search: SearchPage { }

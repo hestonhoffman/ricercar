@@ -97,6 +97,10 @@ msgid "Genres"
 msgstr "ジャンル"
 
 msgctxt "Sidebar"
+msgid "Composers"
+msgstr "作曲家"
+
+msgctxt "Sidebar"
 msgid "Favorites"
 msgstr "お気に入り"
 
@@ -936,6 +940,10 @@ msgid "Start radio"
 msgstr "ラジオを開始"
 
 msgctxt "ContextMenu"
+msgid "Go to composer"
+msgstr "作曲家へ移動"
+
+msgctxt "ContextMenu"
 msgid "Favorite / unfavorite"
 msgstr "お気に入りに追加 / 解除"
 
@@ -1276,6 +1284,41 @@ msgctxt "GenrePage"
 msgid "Shuffle"
 msgstr "シャッフル"
 
+msgctxt "ComposersPage"
+msgid "Composers"
+msgstr "作曲家"
+
+msgctxt "ComposersPage"
+msgid "No composers"
+msgstr "作曲家はいません"
+
+msgctxt "ComposersPage"
+msgid "Composers come from the COMPOSER tag of your files."
+msgstr "作曲家はファイルの COMPOSER タグから取得されます。"
+
+msgctxt "ComposersPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} 枚のアルバム"
+
+msgctxt "ComposerPage"
+msgid "{n} album"
+msgid_plural "{n} albums"
+msgstr[0] "{n} 枚のアルバム"
+
+msgctxt "ComposerPage"
+msgid "{n} track"
+msgid_plural "{n} tracks"
+msgstr[0] "{n} 曲"
+
+msgctxt "ComposerPage"
+msgid "Albums"
+msgstr "アルバム"
+
+msgctxt "ComposerPage"
+msgid "Works"
+msgstr "作品"
+
 msgctxt "FavoritesPage"
 msgid "Favorites"
 msgstr "お気に入り"
@@ -1340,6 +1383,10 @@ msgstr "アルバム"
 msgctxt "SearchPage"
 msgid "Playlists"
 msgstr "プレイリスト"
+
+msgctxt "SearchPage"
+msgid "Composers"
+msgstr "作曲家"
 
 msgctxt "SearchPage"
 msgid "Searching {}…"

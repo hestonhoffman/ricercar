@@ -56,11 +56,11 @@ Renderer, OpenHome (`tests/openhome.rs`):
   `Insert` without unchanged variables.
 
 MediaServer (`tests/dms.rs`):
-- Root containers Albums, Artists, Genres, All tracks, Playlists, Recently
-  added with correct `childCount`; album → tracks with stable ids and
-  `parentID`; `BrowseMetadata` on the root, a top container, an album and a
-  track; paging (`StartingIndex`/`RequestCount`, `TotalMatches`); unknown
-  ids → 701, children of an item → 710.
+- Root containers Albums, Artists, Genres, Composers, All tracks, Playlists,
+  Recently added with correct `childCount`; album → tracks with stable ids
+  and `parentID`; `BrowseMetadata` on the root, a top container, an album
+  and a track; paging (`StartingIndex`/`RequestCount`, `TotalMatches`);
+  unknown ids → 701, children of an item → 710.
 - `res` carries `duration`, `size`, `bitsPerSample`, `sampleFrequency`,
   `nrAudioChannels` and the MIME per extension (flac → `audio/flac`);
   `upnp:albumArtURI` on albums and tracks.

@@ -1,6 +1,6 @@
 // Data exchanged with Rust, and the single global that carries it.
 
-export enum Page { home, albums, album, artists, artist, tracks, genres, genre, favorites, playlist, radio, search, settings, browse, plugins }
+export enum Page { home, albums, album, artists, artist, tracks, genres, genre, composers, composer, favorites, playlist, radio, search, settings, browse, plugins }
 
 export struct AlbumCard {
     id: string,
@@ -321,7 +321,7 @@ export global App {
 
     // ---------------------------------------------------------------- lists
     // Generic actions on a track list: list = "album", "artist-top", "tracks",
-    // "fav", "search", "playlist", "home-played", "genre"
+    // "fav", "search", "playlist", "home-played", "genre", "composer"
     callback track-activate(string, int);
     callback track-action(string, int, string);
     callback album-activate(string);
@@ -335,6 +335,8 @@ export global App {
     in property <[ItemAction]> menu-actions;
     in property <bool> menu-album-nav;
     in property <bool> menu-artist-nav;
+    // the track under the menu has a composer ("Go to composer")
+    in property <bool> menu-composer-nav;
     // An album menu (`menu-opened(true)`): it acts on a local playlist
     // (export), offers "Favorite / unfavorite", and renames or deletes the
     // playlist whose page is open.
@@ -389,6 +391,7 @@ export global App {
     in-out property <int> track-sort;
     callback tracks-sort-changed();
     in property <[GenreCard]> genres;
+    in property <[ArtistCard]> composers;
 
     // ---------------------------------------------------------------- album page
     in property <string> al-id;
@@ -439,6 +442,14 @@ export global App {
     // a plugin that knows this artist can start a radio from it
     in property <bool> ar-radio;
 
+    // ---------------------------------------------------------------- composer page
+    in property <string> cp-name;
+    in property <int> cp-albums;
+    in property <int> cp-tracks;
+    in property <[AlbumCard]> cp-album-list;
+    // the composer's tracks; the first of each album carries its title
+    in property <[TrackRow]> cp-works;
+
     // ---------------------------------------------------------------- radio
     // "Start radio" (plugins with `radio`): whether a menu's item can start
     // one (album menu, track list, track index, album id)…
@@ -479,9 +490,11 @@ export global App {
     in-out property <string> search-text;
     callback search(string);
     in property <[ArtistCard]> s-artists;
+    in property <[ArtistCard]> s-composers;
     in property <[AlbumCard]> s-albums;
     in property <[AlbumCard]> s-playlists;
-    // search results shown: 0 all, 1 artists, 2 tracks, 3 albums, 4 playlists
+    // search results shown: 0 all, 1 artists, 2 tracks, 3 albums, 4 playlists,
+    // 5 composers
     in-out property <int> search-kind;
     // 0 everything, 1 my library (no catalogue search)
     in-out property <int> search-scope;

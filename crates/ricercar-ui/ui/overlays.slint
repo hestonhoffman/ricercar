@@ -711,6 +711,7 @@ export component ContextMenu inherits Rectangle {
                 if !is-album || show-artist || show-fav || show-folder || local-playlist || show-edit: Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
                 if !is-album && (!plugin-list || App.menu-album-nav): MenuLine { text: @tr("Go to album"); icon: Icons.disc-3; clicked => { act("album"); } }
                 if show-artist: MenuLine { text: @tr("Go to artist"); icon: Icons.users-round; clicked => { act("artist"); } }
+                if !is-album && App.menu-composer-nav: MenuLine { text: @tr("Go to composer"); icon: Icons.feather; clicked => { act("composer"); } }
                 if show-fav: MenuLine { text: @tr("Favorite / unfavorite"); icon: Icons.heart; clicked => { act("fav"); } }
                 if show-folder: MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
                 if !is-album && TrackMenu.list == "playlist": MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }

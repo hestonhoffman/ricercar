@@ -86,7 +86,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 ### Library
 - Fast incremental indexing with a folder watcher
 - Instant accent-insensitive search (`bjork` finds Björk)
-- Albums, artists (with "appears on"), genres, all tracks
+- Albums, artists (with "appears on"), genres, composers, all tracks
 - Favorites, play counts, history, most played
 - Playlists with M3U / M3U8 import & export
 - CUE sheets: an album ripped as one file plays as its tracks, gapless and

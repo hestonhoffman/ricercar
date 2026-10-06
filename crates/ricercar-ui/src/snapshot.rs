@@ -276,6 +276,17 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             (1200, Box::new(|ui| ui.navigate(Page::Genres, "", true))),
         ),
         (
+            "composers",
+            (1200, Box::new(|ui| ui.navigate(Page::Composers, "", true))),
+        ),
+        (
+            "composer",
+            (
+                1200,
+                Box::new(|ui| ui.navigate(Page::Composer, "Johann Sebastian Bach", true)),
+            ),
+        ),
+        (
             "playlist",
             (
                 1200,

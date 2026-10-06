@@ -291,6 +291,7 @@ pub fn menu_opened(ui: &Ui, is_album: bool) {
     app.set_menu_actions(ModelRc::new(VecModel::from(actions)));
     app.set_menu_album_nav(album);
     app.set_menu_artist_nav(artist);
+    app.set_menu_composer_nav(!is_album && crate::views::menu_has_composer(ui));
     let (local_playlist, fav, edit) = if is_album {
         album_menu_flags(ui)
     } else {
