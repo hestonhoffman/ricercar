@@ -78,6 +78,8 @@ export struct QueueRow {
 export struct LyricLine {
     text: string,
     ms: int,
+    // The line times its words (see App.lyric-sung).
+    karaoke: bool,
 }
 
 export struct StationRow {
@@ -315,6 +317,8 @@ export global App {
     // ---------------------------------------------------------------- lyrics
     in property <[LyricLine]> lyrics;
     in property <int> lyric-index: -1;
+    // Start of the current line already sung, when it times its words.
+    in property <string> lyric-sung;
     in property <bool> lyrics-synced;
     in property <string> lyrics-status;
     in property <string> lyrics-source;

@@ -278,8 +278,23 @@ component LyricsView inherits Rectangle {
                 animate font-size { duration: 260ms; easing: ease-out; }
                 font-weight: 700;
                 letter-spacing: -0.3px;
-                color: !App.lyrics-synced ? #ffffffd9 : is-current ? #ffffff : i < App.lyric-index ? #ffffff59 : #ffffff73;
+                // Karaoke: the line stays dim and its sung start is drawn
+                // over it, wrapped the same way (a prefix breaks where the
+                // whole line does).
+                property <bool> karaoke: is-current && l.karaoke;
+                color: !App.lyrics-synced ? #ffffffd9 : karaoke ? #ffffff80 : is-current ? #ffffff : i < App.lyric-index ? #ffffff59 : #ffffff73;
                 animate color { duration: 300ms; }
+                if karaoke: Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: App.lyric-sung;
+                    wrap: word-wrap;
+                    font-family: parent.font-family;
+                    font-size: parent.font-size;
+                    font-weight: parent.font-weight;
+                    letter-spacing: parent.letter-spacing;
+                    color: #ffffff;
+                }
                 TouchArea {
                     enabled: App.lyrics-synced;
                     mouse-cursor: App.lyrics-synced ? pointer : default;
