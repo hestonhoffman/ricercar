@@ -1,6 +1,8 @@
-//! Audio setup: pick an output, see what its DAC accepts, choose fixed
-//! volume. Shown once at the first start (`[ui] audio_setup_done`); Settings
-//! → Audio output opens it again. Nothing is applied before the last step.
+//! Audio setup: pick the interface language, an output, see what its DAC
+//! accepts, choose fixed volume. Shown once at the first start (`[ui]
+//! audio_setup_done`); Settings → Audio output opens it again, at the
+//! language too. The language applies (and is saved) at once, like in the
+//! settings; nothing else is applied before the last step.
 //!
 //! The rows come from the settings' device list (`extras::refresh_devices`,
 //! which calls `refresh` here), so capabilities read in the background show
@@ -66,10 +68,14 @@ pub fn initial_choice(rows: &[DeviceRow], current: &str) -> String {
 }
 
 pub fn open(ui: &Rc<Ui>) {
-    let fixed = ui.ctx.config.read().unwrap().audio.fixed_volume;
+    let (fixed, lang) = {
+        let cfg = ui.ctx.config.read().unwrap();
+        (cfg.audio.fixed_volume, cfg.ui.language.clone())
+    };
     CHOICE.with(|c| *c.borrow_mut() = None);
     let app = ui.app();
     app.set_setup_step(0);
+    app.set_ui_language(crate::text::language_index(&lang));
     app.set_setup_fixed(fixed);
     app.set_setup_open(true);
     // Lists the outputs (and calls `refresh`), then reads the cards.
@@ -121,6 +127,15 @@ pub fn refresh(ui: &Ui, rows: &[DeviceRow]) {
     app.set_setup_note(note.into());
 }
 
+/// A language picked: saved and applied at once, as in the settings, so
+/// the assistant goes on in it (and Later keeps it).
+fn pick_language(ui: &Rc<Ui>, index: i32) {
+    let pref = crate::text::language_pref(index);
+    ui.ctx.update_config(|c| c.ui.language = pref.into());
+    ui.app().set_ui_language(index);
+    crate::extras::apply_language(ui);
+}
+
 fn close(ui: &Ui) {
     CHOICE.with(|c| *c.borrow_mut() = None);
     ui.app().set_setup_open(false);
@@ -152,6 +167,7 @@ fn finish(ui: &Ui) {
 pub fn wire(ui: &Rc<Ui>) {
     let app = ui.app();
     app.on_setup_start(|| with_ui(open));
+    app.on_setup_language(|i| with_ui(|ui| pick_language(ui, i)));
     app.on_setup_pick(|name| {
         with_ui(|ui| {
             CHOICE.with(|c| *c.borrow_mut() = Some(name.to_string()));

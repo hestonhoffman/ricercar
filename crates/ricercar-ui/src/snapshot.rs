@@ -377,9 +377,10 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
-            // The audio setup, opened from the settings: the outputs, the
-            // example capabilities above, fixed volume, the summary.
-            "setup-output",
+            // The audio setup, opened from the settings: the language, the
+            // outputs, the example capabilities above, fixed volume, the
+            // summary.
+            "setup-language",
             (
                 900,
                 Box::new(|ui| {
@@ -387,6 +388,10 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                     crate::setup::open(ui);
                 }),
             ),
+        ),
+        (
+            "setup-output",
+            (600, Box::new(|ui| ui.app().set_setup_step(1))),
         ),
         (
             "setup-dac",
@@ -399,7 +404,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                     if let Some(d) = hw {
                         ui.app().invoke_setup_pick(d.name.into());
                     }
-                    ui.app().set_setup_step(1);
+                    ui.app().set_setup_step(2);
                 }),
             ),
         ),
@@ -409,13 +414,13 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                 600,
                 Box::new(|ui| {
                     ui.app().set_setup_fixed(true);
-                    ui.app().set_setup_step(2);
+                    ui.app().set_setup_step(3);
                 }),
             ),
         ),
         (
             "setup-done",
-            (600, Box::new(|ui| ui.app().set_setup_step(3))),
+            (600, Box::new(|ui| ui.app().set_setup_step(4))),
         ),
         (
             // An album ripped as one file with a cue sheet: its tracks,

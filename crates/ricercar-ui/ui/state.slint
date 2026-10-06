@@ -528,13 +528,14 @@ export global App {
     callback set-device-dsd(string, int); // device, 0 pcm / 1 dop / 2 native
     // audio setup assistant (setup.rs)
     in-out property <bool> setup-open;
-    in-out property <int> setup-step; // 0 output, 1 DAC, 2 volume, 3 done
+    in-out property <int> setup-step; // 0 language, 1 output, 2 DAC, 3 volume, 4 done
     in property <[DeviceRow]> setup-outputs; // hardware first
     in property <DeviceRow> setup-dev; // the chosen one, with its capabilities
     in property <string> setup-verdict; // "Plays up to 192 kHz / 32-bit natively"
     in property <string> setup-note; // shared output, unreadable device
     in-out property <bool> setup-fixed;
     callback setup-start();
+    callback setup-language(int); // index in language-names
     callback setup-pick(string);
     callback setup-skip();
     callback setup-finish();
@@ -580,8 +581,10 @@ export global App {
     in-out property <bool> notifications;
     in-out property <bool> close-to-tray;
     in-out property <bool> theme-dark: true;
-    // 0 system, 1 English, 2 French
+    // Index in language-names: 0 system, then text::LANGUAGES in order.
     in-out property <int> ui-language;
+    // Language names stay in their own language.
+    out property <[string]> language-names: [@tr("System"), "English", "Français", "Deutsch", "Español", "Italiano", "日本語"];
     in-out property <bool> adaptive-colors: true;
     in-out property <int> accent-choice;
     in property <string> version;
