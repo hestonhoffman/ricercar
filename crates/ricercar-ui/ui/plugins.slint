@@ -121,7 +121,11 @@ export component SignInDialog inherits Rectangle {
                         text: App.signin-url;
                         font-size: Theme.fs-sm;
                         color: Theme.text2;
-                        wrap: word-wrap;
+                        // An address has no spaces: break anywhere, or its
+                        // width widens the column past the dialog.
+                        wrap: char-wrap;
+                        max-height: 4 * Theme.fs-sm * 1.4;
+                        overflow: elide;
                     }
                     HorizontalLayout {
                         alignment: start;
