@@ -239,6 +239,25 @@ pub fn parse_default_sink(out: &str) -> Option<String> {
         .then(|| name.to_string())
 }
 
+/// Keep a stream on the PipeWire output it was opened on.
+///
+/// WirePlumber treats a stream linked to the default sink as following the
+/// default from then on (PulseAudio behaviour): with the chosen speaker as
+/// default, connecting other Bluetooth headphones made them the default and
+/// moved playback to them. `node.dont-move` makes it ignore that, so the
+/// stream stays on the `NODE` it names; a stream without one still plays to
+/// the default, and one whose node is gone still falls back to it.
+///
+/// PipeWire's ALSA plugin reads extra stream properties from
+/// `PIPEWIRE_ALSA`; one already set by the user is left alone. Call at the
+/// start of `main`, before any thread exists.
+pub fn pin_pipewire_streams() {
+    if std::env::var_os("PIPEWIRE_ALSA").is_none() {
+        // SAFETY: called before any other thread is started.
+        unsafe { std::env::set_var("PIPEWIRE_ALSA", "{ node.dont-move = true }") };
+    }
+}
+
 /// The node inside a `pipewire:NODE="<name>"` device name.
 pub fn pipewire_node(device: &str) -> Option<&str> {
     device
