@@ -163,13 +163,32 @@ pub struct UiConfig {
     /// Interface language: "en", "fr", "de", "es", "it", "ja", or empty to
     /// follow the system.
     pub language: String,
-    /// The setup assistant was finished or skipped. It opens by itself
-    /// only on a first launch (no config file yet). Was `audio_setup_done`.
-    #[serde(alias = "audio_setup_done")]
-    pub setup_done: bool,
+    /// The setup assistant, as the config file records it:
+    /// - absent (`None`): a file from before the assistant, or written by
+    ///   the daemon alone; the assistant never opens by itself;
+    /// - `false`: written at the first launch of the interface, and the
+    ///   assistant was neither finished nor skipped since; it opens at
+    ///   every start until then;
+    /// - `true`: finished or skipped.
+    ///
+    /// Was `audio_setup_done` (a plain boolean, read the same way).
+    #[serde(
+        alias = "audio_setup_done",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub setup_done: Option<bool>,
     /// Light up the words of lyrics that only time their lines, at an
     /// estimated pace (display only).
     pub estimate_word_timing: bool,
+}
+
+impl UiConfig {
+    /// Started by a first launch of the interface, and neither finished
+    /// nor skipped yet.
+    pub fn setup_pending(&self) -> bool {
+        self.setup_done == Some(false)
+    }
 }
 
 impl Default for UiConfig {
@@ -182,7 +201,7 @@ impl Default for UiConfig {
             tray: true,
             close_to_tray: false,
             language: String::new(),
-            setup_done: false,
+            setup_done: None,
             estimate_word_timing: false,
         }
     }
@@ -435,17 +454,33 @@ mod tests {
     fn setup_flag() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("c.toml");
-        // Files written before the setup existed: not done.
+        // A fresh install: no file, nothing recorded yet (the first launch
+        // of the interface writes `false`).
+        assert_eq!(Config::load(&p).ui.setup_done, None);
+        // Files written before the assistant: absent, never pending, and
+        // still absent once saved again.
         std::fs::write(&p, "[ui]\ntheme = \"light\"\n").unwrap();
         let mut c = Config::load(&p);
-        assert!(!c.ui.setup_done);
-        c.ui.setup_done = true;
+        assert_eq!(c.ui.setup_done, None);
+        assert!(!c.ui.setup_pending());
+        c.save(&p).unwrap();
+        assert!(!text_of(&p).contains("setup_done"));
+        // Pending: written as false, read back as pending.
+        c.ui.setup_done = Some(false);
+        c.save(&p).unwrap();
+        assert!(text_of(&p).contains("setup_done = false"));
+        assert!(Config::load(&p).ui.setup_pending());
+        // Done.
+        c.ui.setup_done = Some(true);
         c.save(&p).unwrap();
         assert!(text_of(&p).contains("setup_done = true"));
         assert_eq!(Config::load(&p), c);
-        // The 0.10 name still reads.
+        assert!(!Config::load(&p).ui.setup_pending());
+        // The earlier name still reads.
         std::fs::write(&p, "[ui]\naudio_setup_done = true\n").unwrap();
-        assert!(Config::load(&p).ui.setup_done);
+        assert_eq!(Config::load(&p).ui.setup_done, Some(true));
+        std::fs::write(&p, "[ui]\naudio_setup_done = false\n").unwrap();
+        assert!(Config::load(&p).ui.setup_pending());
     }
 
     #[test]

@@ -1,12 +1,14 @@
 //! Setup assistant: the interface language, music folders, plugins from
 //! the catalogue (and their sign-in), an output, what its DAC accepts,
-//! fixed volume. Opens by itself on a first launch only (no config file
-//! yet), until finished or skipped (`[ui] setup_done`); Settings opens it
-//! again, at the language, with the current values.
+//! fixed volume. Opens by itself after a first launch (no config file
+//! yet), at every start until finished or skipped (`[ui] setup_done`);
+//! Settings opens it again, at the language, with the current values.
 //!
 //! The language applies (and is saved) at once, like in the settings.
 //! Plugins are installed when leaving their step, once the user saw what
 //! is downloaded and from where. Folders, output and volume apply at Save.
+//! On a fresh install no folder is scanned before that: Save scans the
+//! folders chosen, Later the music folder proposed.
 //!
 //! The output rows come from the settings' device list
 //! (`extras::refresh_devices`, which calls `refresh` here), so capabilities
@@ -62,10 +64,11 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
-/// Open the assistant at startup? On a first launch only, and not once
-/// finished or skipped. Upgrades never see it by themselves.
-pub fn should_show(first_run: bool, cfg: &Config) -> bool {
-    first_run && !cfg.ui.setup_done
+/// Open the assistant at startup? When a first launch started it and it
+/// was neither finished nor skipped since (`UiConfig::setup_done`).
+/// Upgrades never see it by themselves.
+pub fn should_show(cfg: &Config) -> bool {
+    cfg.ui.setup_pending()
 }
 
 /// Folders proposed by the library step: the configured ones, else the
@@ -630,13 +633,42 @@ fn close(ui: &Ui) {
     ui.app().set_setup_open(false);
 }
 
-/// Later: nothing more changes, and the assistant is not shown again.
-/// The language and plugins already installed stay.
+/// Later: the assistant is not shown again, and the language and plugins
+/// already installed stay. Nothing else changes, but for a fresh install
+/// with no folder yet: the music folder proposed is scanned, as it would
+/// have been without the assistant (not the list as edited: Later does
+/// not apply the steps).
 fn skip(ui: &Ui) {
-    if !ui.ctx.config.read().unwrap().ui.setup_done {
-        ui.ctx.update_config(|c| c.ui.setup_done = true);
+    let (ui_cfg, roots) = {
+        let c = ui.ctx.config.read().unwrap();
+        (c.ui.clone(), c.library.roots.clone())
+    };
+    let folders = skipped_folders(
+        ui_cfg.setup_pending(),
+        &roots,
+        ricercar_core::config::default_music_dir().as_deref(),
+    );
+    if ui_cfg.setup_done != Some(true) || folders.is_some() {
+        ui.ctx.update_config(|c| {
+            c.ui.setup_done = Some(true);
+            if let Some(f) = folders {
+                c.library.roots = f;
+            }
+        });
+        crate::extras::refresh_library_rows(ui);
     }
     close(ui);
+}
+
+/// The folders Later sets: the proposal, when the first launch is pending
+/// and no folder is configured yet.
+pub fn skipped_folders(
+    pending: bool,
+    configured: &[PathBuf],
+    music: Option<&Path>,
+) -> Option<Vec<PathBuf>> {
+    let f = initial_folders(configured, music);
+    (pending && configured.is_empty() && !f.is_empty()).then_some(f)
 }
 
 /// Save the choices: folders (scanned if they changed), output, volume.
@@ -649,7 +681,7 @@ fn finish(ui: &Ui) {
     ui.ctx.update_config(|c| {
         c.audio.fixed_volume = fixed;
         c.library.roots = folders;
-        c.ui.setup_done = true;
+        c.ui.setup_done = Some(true);
     });
     ui.app().set_fixed_volume(fixed);
     crate::extras::refresh_library_rows(ui);
@@ -693,24 +725,50 @@ mod tests {
     }
 
     #[test]
-    fn shown_on_a_first_launch_only() {
+    fn shown_until_finished_or_skipped() {
         let mut c = Config::default();
-        assert!(should_show(true, &c));
-        // An upgrade: a config file existed.
-        assert!(!should_show(false, &c));
-        c.ui.setup_done = true;
-        assert!(!should_show(true, &c));
+        // No flag: a config from before the assistant, or the daemon's.
+        assert!(!should_show(&c));
+        // Written by a first launch of the interface: at every start.
+        c.ui.setup_done = Some(false);
+        assert!(should_show(&c));
+        c.ui.setup_done = Some(true);
+        assert!(!should_show(&c));
     }
 
     #[test]
-    fn first_launch_from_the_config_file() {
+    fn shown_from_the_config_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("c.toml");
-        // No file (also a `--config` naming a missing one): shown.
-        assert!(should_show(Config::first_run(&p), &Config::load(&p)));
         // A file from an older version, with no flag: not shown.
         std::fs::write(&p, "[audio]\nfixed_volume = true\n").unwrap();
-        assert!(!should_show(Config::first_run(&p), &Config::load(&p)));
+        assert!(!should_show(&Config::load(&p)));
+        // The first launch wrote it pending: shown again after a quit.
+        std::fs::write(&p, "[ui]\nsetup_done = false\n").unwrap();
+        assert!(should_show(&Config::load(&p)));
+        std::fs::write(&p, "[ui]\nsetup_done = true\n").unwrap();
+        assert!(!should_show(&Config::load(&p)));
+        // The earlier name.
+        std::fs::write(&p, "[ui]\naudio_setup_done = true\n").unwrap();
+        assert!(!should_show(&Config::load(&p)));
+    }
+
+    #[test]
+    fn later_scans_the_proposal() {
+        let dir = tempfile::tempdir().unwrap();
+        let music = dir.path().join("Music");
+        std::fs::create_dir(&music).unwrap();
+        // A fresh install skipped: the music folder.
+        assert_eq!(
+            skipped_folders(true, &[], Some(&music)),
+            Some(vec![music.clone()])
+        );
+        // Nothing to propose, folders already chosen, or opened from the
+        // settings: unchanged.
+        assert_eq!(skipped_folders(true, &[], None), None);
+        let mine = vec![PathBuf::from("/path/to/flac")];
+        assert_eq!(skipped_folders(true, &mine, Some(&music)), None);
+        assert_eq!(skipped_folders(false, &[], Some(&music)), None);
     }
 
     #[test]

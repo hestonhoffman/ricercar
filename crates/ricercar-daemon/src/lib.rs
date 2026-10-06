@@ -167,11 +167,18 @@ pub fn forward_to_running(args: &Args) -> bool {
     true
 }
 
-/// Front-end callbacks for desktop integration (MPRIS Raise/Quit).
+/// Front-end callbacks for desktop integration (MPRIS Raise/Quit), and
+/// what the front end offers.
 #[derive(Clone, Default)]
 pub struct Hooks {
     pub on_raise: Option<Arc<dyn Fn() + Send + Sync>>,
     pub on_quit: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The front end has a setup assistant (the desktop app). At a first
+    /// launch it then gets to choose the music folders: the default one is
+    /// only proposed, and nothing is scanned before it is saved or skipped.
+    /// Without it (the daemon, `--headless`), the default folder is scanned
+    /// at once.
+    pub setup_assistant: bool,
 }
 
 pub struct AppContext {
@@ -180,9 +187,6 @@ pub struct AppContext {
     pub covers: Arc<CoverCache>,
     pub config: Arc<RwLock<Config>>,
     pub config_path: PathBuf,
-    /// No config file existed at startup (a fresh install, or `--config`
-    /// naming a missing file): the interface offers its setup assistant.
-    pub first_run: bool,
     /// Writes files off the calling thread (the UI thread, mostly).
     /// config.toml is durable, written there; ui-state.json too, as a cache.
     pub io: Arc<LatestWriter>,
@@ -337,6 +341,13 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
     let config_path = args.config.clone().unwrap_or_else(Config::default_path);
     let first_run = Config::first_run(&config_path);
     let mut cfg = Config::load(&config_path);
+    if first_run && hooks.setup_assistant {
+        // The assistant proposes the music folder (`setup::initial_folders`)
+        // and opens at every start until finished or skipped. Folders given
+        // on the command line are scanned all the same.
+        cfg.library.roots.clear();
+        cfg.ui.setup_done = Some(false);
+    }
     if let Some(d) = &args.device {
         cfg.audio.device = d.clone();
     }
@@ -461,7 +472,6 @@ pub fn startup(args: Args, hooks: Hooks) -> Result<AppContext, Box<dyn std::erro
         covers,
         config,
         config_path,
-        first_run,
         io,
         quit,
         watcher,

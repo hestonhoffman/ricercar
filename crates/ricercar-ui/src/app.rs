@@ -498,6 +498,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
                 let _ = slint::quit_event_loop();
             });
         })),
+        setup_assistant: true,
     };
     let snapshot = std::env::var_os("RICERCAR_SNAPSHOT").map(std::path::PathBuf::from);
     if snapshot.is_some() {
@@ -564,7 +565,7 @@ pub fn run(args: ricercar_daemon::Args) -> Result<(), Box<dyn std::error::Error>
         restore_state(&ui)
     };
     ui.navigate(page, &arg, true);
-    if !snapshot_mode && crate::setup::should_show(ctx.first_run, &ctx.config.read().unwrap()) {
+    if !snapshot_mode && crate::setup::should_show(&ctx.config.read().unwrap()) {
         crate::setup::open(&ui);
     }
     crate::updates::check(&ui);
