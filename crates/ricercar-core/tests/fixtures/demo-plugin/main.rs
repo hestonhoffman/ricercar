@@ -19,8 +19,8 @@
 //! logged at start (it asks for a restart), and signing in adds a choice
 //! to `quality`, sent with `settings.declared`.
 //!
-//! Optional parts: lyrics (synced for track 1, plain for track 2, track 3
-//! instrumental), album/artist/label refs, actions (a "play" radio and a
+//! Optional parts: lyrics (synced for track 1, its second line word by
+//! word, plain for track 2, track 3 instrumental), album/artist/label refs, actions (a "play" radio and a
 //! "browse" similar albums), favourite flags, two playlists (one editable,
 //! with entry ids and every `playlists.*` method), details, `radio.next`,
 //! and `delivery: "proxied"` for the tracks of album 2.
@@ -366,7 +366,14 @@ fn lyrics(r: &str) -> Option<Value> {
         "track/1" => json!({
             "synced": [
                 {"time_ms": 0, "text": "First light on the demo line"},
-                {"time_ms": 400, "text": "Every sample where it should be"},
+                {"time_ms": 400, "text": "Every sample where it should be", "words": [
+                    {"time_ms": 400, "text": "Every"},
+                    {"time_ms": 460, "text": "sample"},
+                    {"time_ms": 540, "text": "where"},
+                    {"time_ms": 600, "text": "it"},
+                    {"time_ms": 640, "text": "should"},
+                    {"time_ms": 720, "text": "be"}
+                ]},
                 {"time_ms": 800, "text": ""}
             ],
             "plain": "First light on the demo line\nEvery sample where it should be"

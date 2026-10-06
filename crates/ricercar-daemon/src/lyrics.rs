@@ -7,7 +7,8 @@ use std::path::Path;
 use ricercar_core::TrackInfo;
 use ricercar_core::plugin::{PluginError, PluginHost, parse_plugin_uri};
 use ricercar_online::lyrics::{
-    LrclibQuery, LyricLine, Lyrics, LyricsCache, LyricsSource, PluginAnswer, fetch_for_plugin_track,
+    LrclibQuery, LyricLine, LyricWord, Lyrics, LyricsCache, LyricsSource, PluginAnswer,
+    fetch_for_plugin_track,
 };
 
 /// Lyrics of a `plugin://` track, `None` when nobody has any. Blocking
@@ -33,6 +34,14 @@ pub fn for_plugin_track(
                     .map(|x| LyricLine {
                         time_ms: x.time_ms,
                         text: x.text,
+                        words: x
+                            .words
+                            .into_iter()
+                            .map(|w| LyricWord {
+                                time_ms: w.time_ms,
+                                text: w.text,
+                            })
+                            .collect(),
                     })
                     .collect()
             }),

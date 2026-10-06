@@ -18,6 +18,10 @@ use crate::{BufferedPart, ChainHop, LyricLine, Page, QueueRow};
 
 /// A wait shorter than this shows no loading state.
 const LOADING_SHOWN_AFTER: Duration = Duration::from_millis(300);
+/// Lines turn current this much early, so the scroll lands on time.
+const LINE_LEAD_MS: u64 = 250;
+/// Words light up this much early: half a tick, so on time on average.
+const WORD_LEAD_MS: u64 = 60;
 
 #[derive(Default)]
 pub struct PlayerView {
@@ -27,6 +31,8 @@ pub struct PlayerView {
     lyrics: Vec<Line>,
     synced: bool,
     lyric_index: i32,
+    /// Word being sung in the current line, -1 when none (or no words).
+    lyric_word: i32,
     chain_sig: String,
     lib_rev_seen: u64,
     lib_rev_changed_at: Option<Instant>,
@@ -278,7 +284,7 @@ fn tick_inner(ui: &Rc<Ui>) {
     let idx = {
         let pv = ui.player.borrow();
         if pv.synced {
-            ricercar_online::lyrics::line_at(&pv.lyrics, st.pos_ms + 250)
+            ricercar_online::lyrics::line_at(&pv.lyrics, st.pos_ms + LINE_LEAD_MS)
                 .map(|i| i as i32)
                 .unwrap_or(-1)
         } else {
@@ -287,8 +293,29 @@ fn tick_inner(ui: &Rc<Ui>) {
     };
     tracing::trace!(target: "lyrics", idx, pos = st.pos_ms, "lyric line");
     if idx != ui.player.borrow().lyric_index {
-        ui.player.borrow_mut().lyric_index = idx;
+        let mut pv = ui.player.borrow_mut();
+        pv.lyric_index = idx;
+        if pv.lyric_word != -1 {
+            pv.lyric_word = -1;
+            app.set_lyric_sung(Default::default());
+        }
         app.set_lyric_index(idx);
+    }
+    // ---- lyrics word (lines that time their words)
+    {
+        let mut pv = ui.player.borrow_mut();
+        let line = usize::try_from(idx).ok().and_then(|i| pv.lyrics.get(i));
+        let word = line
+            .and_then(|l| ricercar_online::lyrics::word_at(&l.words, st.pos_ms + WORD_LEAD_MS))
+            .map_or(-1, |w| w as i32);
+        if word != pv.lyric_word {
+            let sung = match (line, usize::try_from(word)) {
+                (Some(l), Ok(w)) => l.sung(w).into(),
+                _ => Default::default(),
+            };
+            app.set_lyric_sung(sung);
+            pv.lyric_word = word;
+        }
     }
 
     crate::extras::poll_network_status(ui);
@@ -911,6 +938,7 @@ fn set_lyrics(ui: &Ui, lines: Vec<Line>, synced: bool, status: &str, source: &st
         .map(|l| LyricLine {
             text: l.text.clone().into(),
             ms: l.time_ms.min(i32::MAX as u64) as i32,
+            karaoke: synced && !l.words.is_empty(),
         })
         .collect();
     app.set_lyrics(ModelRc::new(VecModel::from(rows)));
@@ -918,10 +946,12 @@ fn set_lyrics(ui: &Ui, lines: Vec<Line>, synced: bool, status: &str, source: &st
     app.set_lyrics_status(status.into());
     app.set_lyrics_source(source.into());
     app.set_lyric_index(-1);
+    app.set_lyric_sung(Default::default());
     let mut pv = ui.player.borrow_mut();
     pv.lyrics = lines;
     pv.synced = synced;
     pv.lyric_index = -1;
+    pv.lyric_word = -1;
 }
 
 fn plain_lines(text: &str) -> Vec<Line> {
@@ -929,6 +959,7 @@ fn plain_lines(text: &str) -> Vec<Line> {
         .map(|l| Line {
             time_ms: 0,
             text: l.trim().to_string(),
+            words: Vec::new(),
         })
         .collect()
 }

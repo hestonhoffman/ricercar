@@ -532,6 +532,13 @@ fn lyrics_from_the_plugin() {
     let synced = l.synced.unwrap();
     assert_eq!(synced.len(), 3);
     assert!(synced.windows(2).all(|w| w[0].time_ms <= w[1].time_ms));
+    assert!(synced[0].words.is_empty());
+    let words: Vec<&str> = synced[1].words.iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(
+        words,
+        ["Every ", "sample ", "where ", "it ", "should ", "be"]
+    );
+    assert_eq!(synced[1].words[1].time_ms, 460);
     assert!(l.plain.unwrap().starts_with("First light"));
     let l = h.lyrics_get("demo", "track/2").unwrap();
     assert!(l.synced.is_none() && l.plain.is_some());

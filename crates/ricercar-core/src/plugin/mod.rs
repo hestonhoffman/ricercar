@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::controller::TrackInfo;
 
 pub use content::{
-    Biography, Fact, ItemDetails, LyricLine, MAX_BIOGRAPHY, MAX_FACTS, MAX_LYRIC_LINES,
+    Biography, Fact, ItemDetails, LyricLine, LyricWord, MAX_BIOGRAPHY, MAX_FACTS, MAX_LYRIC_LINES,
     MAX_SHELF_ITEMS, MAX_SHELVES, PluginLyrics, Shelf,
 };
 pub use host::{PlaylistEdited, PluginHost, PluginStatus, RADIO_LIMIT, RunState, TRACKS_MAX};

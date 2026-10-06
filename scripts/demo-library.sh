@@ -111,6 +111,6 @@ cargo run -q --manifest-path "$root/Cargo.toml" -p ricercar-audio --example sacd
   "262:12:Morning Tide" "392:12:Lanterns" "523:12:Last Ferry"
 n=$((n + 3))
 
-printf '[00:02.00]First line of a synthetic lyric\n[00:06.00]Second line, a little longer than the first\n[00:10.50]Third line\n[00:15.00]\n[00:17.00]The chorus comes back again\n[00:22.00]And fades out slowly\n' \
+printf '[00:02.00]First line of a synthetic lyric\n[00:06.00]Second line, a little longer than the first\n[00:10.50]<00:10.50>Third <00:11.20>line\n[00:15.00]\n[00:17.00]The chorus comes back again\n[00:22.00]And fades out slowly\n' \
   > "$D/Kaito Mori/Neon Rain/01 Neon Rain.lrc"
 echo "$n tracks in $D"
