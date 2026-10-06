@@ -68,6 +68,23 @@ pub fn language() -> &'static str {
     LANGUAGES[current()].0
 }
 
+/// Position of the `[ui] language` setting in the language menus (Settings,
+/// audio setup): 0 is "System" (empty), then `LANGUAGES` in order.
+pub fn language_index(pref: &str) -> i32 {
+    LANGUAGES
+        .iter()
+        .position(|(code, _)| *code == pref)
+        .map_or(0, |i| i as i32 + 1)
+}
+
+/// The setting for a position in the language menus; "System" is empty.
+pub fn language_pref(index: i32) -> &'static str {
+    match index {
+        i @ 1.. => LANGUAGES.get(i as usize - 1).map_or("", |(code, _)| code),
+        _ => "",
+    }
+}
+
 fn catalog(i: usize) -> &'static HashMap<String, serde_json::Value> {
     static TABLES: [OnceLock<HashMap<String, serde_json::Value>>; 6] =
         [const { OnceLock::new() }; 6];
@@ -344,6 +361,20 @@ mod tests {
         let r = f();
         LANG.set(None);
         r
+    }
+
+    #[test]
+    fn language_menu() {
+        assert_eq!(language_index(""), 0);
+        assert_eq!(language_index("en"), 1);
+        assert_eq!(language_index("ja"), 6);
+        assert_eq!(language_index("xx"), 0);
+        for (i, (code, _)) in LANGUAGES.iter().enumerate() {
+            assert_eq!(language_pref(i as i32 + 1), *code);
+        }
+        assert_eq!(language_pref(0), "");
+        assert_eq!(language_pref(-1), "");
+        assert_eq!(language_pref(7), "");
     }
 
     fn placeholders(s: &str) -> Vec<&str> {

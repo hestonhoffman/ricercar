@@ -372,13 +372,7 @@ pub fn load_settings(ui: &Rc<Ui>) {
     app.set_notifications(cfg.ui.notifications);
     app.set_close_to_tray(cfg.ui.close_to_tray);
     app.set_theme_dark(cfg.ui.theme == ThemeCfg::Dark);
-    // 0 is "System", then text::LANGUAGES in order.
-    app.set_ui_language(
-        crate::text::LANGUAGES
-            .iter()
-            .position(|(code, _)| *code == cfg.ui.language)
-            .map_or(0, |i| i as i32 + 1),
-    );
+    app.set_ui_language(crate::text::language_index(&cfg.ui.language));
     app.set_adaptive_colors(cfg.ui.adaptive_colors);
     app.set_accent_choice(
         ACCENTS
@@ -756,6 +750,18 @@ pub fn apply_theme(ui: &Ui) {
     ui.app().set_theme_dark(cfg.theme == ThemeCfg::Dark);
 }
 
+/// Switch to the language of the config, live: the .slint side switches at
+/// once; strings built on the Rust side come back with the page and the
+/// settings (which also refill the audio setup).
+pub fn apply_language(ui: &Rc<Ui>) {
+    let lang = ui.ctx.config.read().unwrap().ui.language.clone();
+    let before = crate::text::language();
+    if crate::text::set_language(&lang) != before {
+        ui.reload_page();
+        load_settings(ui);
+    }
+}
+
 fn settings_changed(ui: &Rc<Ui>) {
     let app = ui.app();
     let rg = match app.get_replaygain() {
@@ -792,22 +798,9 @@ fn settings_changed(ui: &Rc<Ui>) {
         };
         c.ui.adaptive_colors = app.get_adaptive_colors();
         c.ui.accent = accent.into();
-        c.ui.language = match app.get_ui_language() {
-            i @ 1.. => crate::text::LANGUAGES
-                .get(i as usize - 1)
-                .map_or("", |(code, _)| code),
-            _ => "",
-        }
-        .into();
+        c.ui.language = crate::text::language_pref(app.get_ui_language()).into();
     });
-    // Language, live: the .slint side switches at once; strings built on
-    // the Rust side come back with the page and the settings.
-    let lang = ui.ctx.config.read().unwrap().ui.language.clone();
-    let before = crate::text::language();
-    if crate::text::set_language(&lang) != before {
-        ui.reload_page();
-        load_settings(ui);
-    }
+    apply_language(ui);
     ui.ctx.ctl.set_replaygain(rg, preamp);
     ui.loader.borrow().set_online(app.get_covers_online());
     apply_theme(ui);
