@@ -377,9 +377,10 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
-            // The audio setup, opened from the settings: the language, the
-            // outputs, the example capabilities above, fixed volume, the
-            // summary.
+            // The setup assistant, opened from the settings: the language,
+            // the music folders, plugins from a made-up local catalogue
+            // (nothing installed), the outputs, the example capabilities
+            // above, fixed volume, the summary.
             "setup-language",
             (
                 900,
@@ -390,8 +391,45 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            "setup-library",
+            (600, Box::new(|ui| crate::setup::go(ui, 1))),
+        ),
+        (
+            "setup-plugins",
+            (
+                900,
+                Box::new(|ui| {
+                    let index = ricercar_core::config::cache_dir().join("setup-index.json");
+                    let _ = std::fs::create_dir_all(index.parent().unwrap());
+                    let _ = std::fs::write(&index, setup_index().to_string());
+                    ui.plugins.borrow_mut().index_override = Some(index.display().to_string());
+                    crate::setup::go(ui, 2);
+                }),
+            ),
+        ),
+        (
+            "setup-plugins-confirm",
+            (
+                600,
+                Box::new(|ui| {
+                    ui.app()
+                        .invoke_setup_plugin_check("example-source".into(), true);
+                    ui.app().invoke_setup_next();
+                }),
+            ),
+        ),
+        (
             "setup-output",
-            (600, Box::new(|ui| ui.app().set_setup_step(1))),
+            (
+                600,
+                Box::new(|ui| {
+                    ui.plugins.borrow_mut().index_override = None;
+                    ui.app().invoke_setup_back();
+                    ui.app()
+                        .invoke_setup_plugin_check("example-source".into(), false);
+                    crate::setup::go(ui, 3);
+                }),
+            ),
         ),
         (
             "setup-dac",
@@ -404,7 +442,7 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                     if let Some(d) = hw {
                         ui.app().invoke_setup_pick(d.name.into());
                     }
-                    ui.app().set_setup_step(2);
+                    crate::setup::go(ui, 4);
                 }),
             ),
         ),
@@ -414,14 +452,11 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
                 600,
                 Box::new(|ui| {
                     ui.app().set_setup_fixed(true);
-                    ui.app().set_setup_step(3);
+                    crate::setup::go(ui, 5);
                 }),
             ),
         ),
-        (
-            "setup-done",
-            (600, Box::new(|ui| ui.app().set_setup_step(4))),
-        ),
+        ("setup-done", (600, Box::new(|ui| crate::setup::go(ui, 6)))),
         (
             // An album ripped as one file with a cue sheet: its tracks,
             // and the second one playing.
@@ -964,6 +999,33 @@ fn scroll_page(ui: &Ui, dy: f32) {
             delta_x: 0.0,
             delta_y: -dy,
         });
+}
+
+/// A made-up catalogue for the setup assistant: two entries whose
+/// binaries are never downloaded (the tour stops at the confirmation).
+fn setup_index() -> serde_json::Value {
+    let entry = |id: &str, name: &str, description: &str, caps: &[&str]| {
+        serde_json::json!({
+            "id": id,
+            "name": name,
+            "description": description,
+            "repository": format!("https://example.org/{id}"),
+            "author": "Example author",
+            "license": "MIT",
+            "version": "1.0.0",
+            "protocol": ricercar_core::plugin::PROTOCOL,
+            "capabilities": caps,
+            "assets": [{
+                "arch": ricercar_core::plugin::catalog::current_arch(),
+                "url": format!("https://example.org/{id}/releases/{id}"),
+                "sha256": "0".repeat(64),
+            }]
+        })
+    };
+    serde_json::json!({"version": 1, "plugins": [
+        entry("example-source", "Example source", "Albums and playlists from an example service, after you sign in.", &["auth", "browse", "search", "resolve"]),
+        entry("example-radio", "Example radio", "Stations from an example directory.", &["browse", "resolve"]),
+    ]})
 }
 
 fn plugins_tour(dir: std::path::PathBuf) {
