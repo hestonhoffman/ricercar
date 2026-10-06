@@ -166,6 +166,9 @@ pub struct UiConfig {
     /// The first-run audio setup was finished or skipped. Not needed when
     /// an output other than `default` is configured.
     pub audio_setup_done: bool,
+    /// Light up the words of lyrics that only time their lines, at an
+    /// estimated pace (display only).
+    pub estimate_word_timing: bool,
 }
 
 impl Default for UiConfig {
@@ -179,6 +182,7 @@ impl Default for UiConfig {
             close_to_tray: false,
             language: String::new(),
             audio_setup_done: false,
+            estimate_word_timing: false,
         }
     }
 }
@@ -431,6 +435,19 @@ mod tests {
         c.ui.audio_setup_done = true;
         c.save(&p).unwrap();
         assert!(text_of(&p).contains("audio_setup_done = true"));
+        assert_eq!(Config::load(&p), c);
+    }
+
+    #[test]
+    fn estimate_word_timing_is_off_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(&p, "[ui]\ntheme = \"light\"\n").unwrap();
+        let mut c = Config::load(&p);
+        assert!(!c.ui.estimate_word_timing);
+        c.ui.estimate_word_timing = true;
+        c.save(&p).unwrap();
+        assert!(text_of(&p).contains("estimate_word_timing = true"));
         assert_eq!(Config::load(&p), c);
     }
 

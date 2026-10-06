@@ -95,7 +95,8 @@ Most Linux players either sound right or look right. ricercar tries to do both:
   stereo area, with the disc's text (titles, artists, year, genre)
 - Covers: embedded, folder images, or Cover Art Archive
 - Synced lyrics from `.lrc` files, tags, source plugins or lrclib.net,
-  word by word when they time their words (enhanced LRC)
+  word by word when they time their words (enhanced LRC), or at an
+  estimated pace if you turn it on
 
 </td>
 </tr>
@@ -474,6 +475,7 @@ tray = true
 close_to_tray = false
 language = ""              # en, fr, de, es, it, ja; empty follows the system
 audio_setup_done = false   # the first-run audio setup was finished or skipped
+estimate_word_timing = false # light up words of line-timed lyrics at an estimated pace
 
 [scrobble]
 listenbrainz_token = ""

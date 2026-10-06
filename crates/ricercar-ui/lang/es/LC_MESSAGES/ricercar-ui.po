@@ -695,6 +695,14 @@ msgid "Tint the interface with the playing album's colours."
 msgstr "Tiñe la interfaz con los colores del álbum en reproducción."
 
 msgctxt "SettingsPage"
+msgid "Estimate word timing"
+msgstr "Estimar el ritmo de las palabras"
+
+msgctxt "SettingsPage"
+msgid "When lyrics only time lines, light up words at an estimated pace."
+msgstr "Cuando la letra solo marca el tiempo de las líneas, ilumina las palabras a un ritmo estimado."
+
+msgctxt "SettingsPage"
 msgid "Keep playing in the tray when the window is closed"
 msgstr "Seguir reproduciendo en la bandeja al cerrar la ventana"
 

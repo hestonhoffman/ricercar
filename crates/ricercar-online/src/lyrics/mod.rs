@@ -136,6 +136,103 @@ pub fn word_at(words: &[LyricWord], pos_ms: u64) -> Option<usize> {
         .checked_sub(1)
 }
 
+/// Estimated word timing: each word weighs its letters plus this many, so
+/// short words still take a moment.
+const EST_WORD_WEIGHT: u64 = 2;
+/// Estimated singing pace, per unit of weight: a line lasts at most its
+/// weight times this, so a long gap after it does not make the words crawl.
+const EST_MS_PER_UNIT: u64 = 90;
+/// Lower bound of that cap, for very short lines.
+const EST_MIN_LINE_MS: u64 = 1_000;
+
+/// `lines` (sorted) with estimated [`LyricLine::words`] on the lines that
+/// have none, for display only: lines that time their words keep them.
+/// Each line's words are spread over the time until the next line, capped
+/// (see [`estimate_words`]); the last line gets the cap.
+pub fn with_estimated_words(lines: &[LyricLine]) -> Vec<LyricLine> {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let mut l = l.clone();
+            if l.words.is_empty() {
+                let next = lines.get(i + 1).map(|n| n.time_ms);
+                l.words = estimate_words(&l.text, l.time_ms, next);
+            }
+            l
+        })
+        .collect()
+}
+
+/// Estimated words of a line with only a line time: `text` split into
+/// words that join back into it (spaces go with the word before, leading
+/// ones with the first), started in proportion to their letters (plus
+/// [`EST_WORD_WEIGHT`]) over the line's duration, from `start_ms` until
+/// `next_ms` but at most [`EST_MS_PER_UNIT`] per unit of weight (at least
+/// [`EST_MIN_LINE_MS`]). Text without spaces between words (Chinese,
+/// Japanese) goes character by character. Empty for a blank line.
+pub fn estimate_words(text: &str, start_ms: u64, next_ms: Option<u64>) -> Vec<LyricWord> {
+    let pieces = split_estimated(text);
+    if pieces.is_empty() {
+        return Vec::new();
+    }
+    let weight =
+        |p: &str| p.chars().filter(|c| c.is_alphanumeric()).count() as u64 + EST_WORD_WEIGHT;
+    let total: u64 = pieces.iter().map(|p| weight(p)).sum();
+    let cap = (total * EST_MS_PER_UNIT).max(EST_MIN_LINE_MS);
+    let dur = next_ms.map_or(cap, |n| n.saturating_sub(start_ms).min(cap));
+    let mut before = 0;
+    pieces
+        .into_iter()
+        .map(|p| {
+            let time_ms = start_ms + dur * before / total;
+            before += weight(p);
+            LyricWord {
+                time_ms,
+                text: p.to_owned(),
+            }
+        })
+        .collect()
+}
+
+/// Characters of scripts written without spaces between words.
+fn unspaced(c: char) -> bool {
+    matches!(c,
+        // Hiragana, katakana (not the middle dot and the long vowel mark).
+        '\u{3040}'..='\u{30fa}' | '\u{30fd}'..='\u{30ff}'
+        | '\u{3400}'..='\u{4dbf}' // CJK extension A
+        | '\u{4e00}'..='\u{9fff}' // CJK unified ideographs
+        | '\u{f900}'..='\u{faff}' // CJK compatibility ideographs
+        | '\u{ff66}'..='\u{ff6f}' | '\u{ff71}'..='\u{ff9d}' // half-width katakana
+    )
+}
+
+/// `text` cut into the words of [`estimate_words`]; none when blank.
+fn split_estimated(text: &str) -> Vec<&str> {
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut starts = Vec::new();
+    let mut prev: Option<char> = None;
+    for (i, c) in text.char_indices() {
+        if !c.is_whitespace() {
+            if starts.is_empty() {
+                // Leading spaces stay with the first word.
+                starts.push(0);
+            } else if prev.is_some_and(|p| {
+                p.is_whitespace()
+                    || unspaced(c)
+                    || (unspaced(p) && c < '\u{3000}' && c.is_alphanumeric())
+            }) {
+                starts.push(i);
+            }
+        }
+        prev = Some(c);
+    }
+    starts.push(text.len());
+    starts.windows(2).map(|w| &text[w[0]..w[1]]).collect()
+}
+
 /// Looks lyrics up in `cache`, falling back to LRCLIB and caching the result
 /// (including "not found"). Network errors are returned and not cached.
 pub fn fetch_cached(
@@ -525,6 +622,105 @@ mod tests {
             }],
         };
         assert_eq!(odd.sung(0), "ab");
+    }
+
+    fn est(text: &str, start: u64, next: Option<u64>) -> Vec<(u64, String)> {
+        estimate_words(text, start, next)
+            .into_iter()
+            .map(|w| (w.time_ms, w.text))
+            .collect()
+    }
+
+    #[test]
+    fn estimated_words_join_into_the_text() {
+        for text in [
+            "Some words here",
+            "  Hey,   you  ",
+            "Don't stop — believin'!",
+            "日本語の歌、ララ",
+            "愛してる love you",
+            "x",
+        ] {
+            let words = estimate_words(text, 1_000, Some(9_000));
+            let joined: String = words.iter().map(|w| w.text.as_str()).collect();
+            assert_eq!(joined, text);
+        }
+    }
+
+    #[test]
+    fn estimated_words_split() {
+        let texts = |t: &str| -> Vec<String> { est(t, 0, None).into_iter().map(|w| w.1).collect() };
+        assert_eq!(texts("Some words here"), ["Some ", "words ", "here"]);
+        assert_eq!(texts("  Hey,   you "), ["  Hey,   ", "you "]);
+        // Punctuation stays with its word, a lone dash is a word of its own.
+        assert_eq!(texts("Stop — now!"), ["Stop ", "— ", "now!"]);
+        // Character by character without spaces, punctuation and long
+        // vowel marks with the character before.
+        assert_eq!(texts("歌、ラーメン"), ["歌、", "ラー", "メ", "ン"]);
+        assert_eq!(texts("愛love"), ["愛", "love"]);
+    }
+
+    #[test]
+    fn estimated_times_are_proportional() {
+        // Weights: "a " 1+2, "bbbb " 4+2, "c" 1+2 = 12; the next line
+        // (in 1 s) comes before the cap (12 × 90 ms).
+        assert_eq!(
+            est("a bbbb c", 10_000, Some(11_000)),
+            [
+                (10_000, "a ".to_owned()),
+                (10_250, "bbbb ".to_owned()),
+                (10_750, "c".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn estimated_times_stay_in_the_line() {
+        let text = "I feel your breath upon my neck";
+        for next in [Some(12_000), Some(10_001), Some(10_000), Some(60_000), None] {
+            let words = estimate_words(text, 10_000, next);
+            let end = next.map_or(u64::MAX, |n| n.max(10_001));
+            assert_eq!(words[0].time_ms, 10_000);
+            assert!(words.windows(2).all(|w| w[0].time_ms <= w[1].time_ms));
+            assert!(words.iter().all(|w| (10_000..end).contains(&w.time_ms)));
+        }
+    }
+
+    #[test]
+    fn estimate_is_capped_on_long_gaps() {
+        // Weight 4 + 4 + 6 = 14: at most 1.26 s for the line.
+        let capped = est("Oh my love", 0, Some(30_000));
+        assert_eq!(capped, est("Oh my love", 0, Some(1_260)));
+        assert_eq!(capped, est("Oh my love", 0, None));
+        let times: Vec<u64> = capped.iter().map(|w| w.0).collect();
+        assert_eq!(times, [0, 360, 720]);
+        // The cap never goes under a second.
+        assert_eq!(est("a b", 0, Some(30_000))[1].0, 500);
+    }
+
+    #[test]
+    fn estimate_blank_and_single_word() {
+        assert!(estimate_words("", 0, Some(1_000)).is_empty());
+        assert!(estimate_words("   ", 0, Some(1_000)).is_empty());
+        assert_eq!(
+            est("Hello", 5_000, Some(9_000)),
+            [(5_000, "Hello".to_owned())]
+        );
+    }
+
+    #[test]
+    fn real_words_win_over_estimates() {
+        let lrc = "[00:01.00]plain line\n[00:02.00]<00:02.00>timed <00:02.50>line\n[00:03.00]\n[00:04.00]last one";
+        let lines = parse_lrc(lrc);
+        let shown = with_estimated_words(&lines);
+        assert_eq!(texts(&shown), texts(&lines));
+        // Weight 7 + 6, over the second until the next line.
+        assert_eq!(words(&shown[0]), [(1_000, "plain "), (1_538, "line")]);
+        assert_eq!(shown[1].words, lines[1].words);
+        assert!(shown[2].words.is_empty());
+        // The last line: the cap (weight 6 + 5, so its minimum, 1 s).
+        assert_eq!(words(&shown[3]), [(4_000, "last "), (4_545, "one")]);
+        assert!(lines[0].words.is_empty(), "the source is left alone");
     }
 
     #[test]

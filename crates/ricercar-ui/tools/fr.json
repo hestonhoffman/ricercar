@@ -96,6 +96,8 @@
 "Accent colour": "Couleur d'accent",
 "Colours from the album cover": "Couleurs de la pochette",
 "Tint the interface with the playing album's colours.": "Teinte l'interface avec les couleurs de l'album en cours.",
+"Estimate word timing": "Estimer le rythme des mots",
+"When lyrics only time lines, light up words at an estimated pace.": "Quand les paroles ne sont synchronisées que ligne par ligne, allume les mots à un rythme estimé.",
 "Track change notifications": "Notifications de changement de titre",
 "Keep playing in the tray when the window is closed": "Continuer la lecture dans la zone de notification à la fermeture",
 "Keyboard": "Clavier",
