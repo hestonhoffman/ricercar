@@ -305,14 +305,14 @@ Install `dist/io.github.ricercar_player.ricercar.metainfo.xml` into
 
 ### First run
 
-1. `./target/release/ricercar`. Your XDG music folder (usually `~/Music`)
-   is indexed automatically; add others in **Settings → Library**.
-2. Pick your DAC in **Settings → Audio output**. `hw:` devices are marked
+1. `./target/release/ricercar`. On a fresh install a setup assistant
+   opens: interface language, music folders (your XDG music folder, usually
+   `~/Music`, is proposed), plugins from the catalogue (and their sign-in),
+   then the output, what your DAC accepts and fixed volume. *Later* skips
+   it; **Settings → Setup assistant** opens it again.
+2. Your DAC is in **Settings → Audio output**. `hw:` devices are marked
    **BIT-PERFECT**; `default` / `pipewire` are marked **SHARED** (they go
-   through the system mixer). On the first start, a short audio setup
-   walks through this (output, what the DAC accepts, fixed volume); it is
-   skipped when an output is already configured, and **Audio setup** in the
-   same section opens it again.
+   through the system mixer). Music folders are in **Settings → Library**.
 3. Press play. The green dot on the chain line under the seek bar means
    bit-perfect.
 
@@ -474,7 +474,7 @@ notifications = true
 tray = true
 close_to_tray = false
 language = ""              # en, fr, de, es, it, ja; empty follows the system
-audio_setup_done = false   # the first-run audio setup was finished or skipped
+setup_done = false         # the setup assistant was finished or skipped
 estimate_word_timing = false # light up words of line-timed lyrics at an estimated pace
 
 [scrobble]
