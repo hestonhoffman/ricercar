@@ -3,6 +3,7 @@
 //! Object ids are stable paths of percent-encoded segments:
 //! `0` · `albums` · `albums/<album>` · `albums/<album>/<track path>` ·
 //! `artists/<name>/<album>/<track path>` · `genres/<genre>/<album>/…` ·
+//! `composers/<name>/<album>/…` ·
 //! `tracks/<track path>` · `playlists/<id>/<position>` · `recent/<album>/…`.
 
 use ricercar_core::{Album, AlbumSort, Artist, Genre, Playlist, Track, TrackInfo, TrackSort, meta};
@@ -13,10 +14,11 @@ use crate::{Renderer, Svc, didl, xml};
 
 const RECENT_ALBUMS: usize = 50;
 
-const TOPS: [(&str, &str); 6] = [
+const TOPS: [(&str, &str); 7] = [
     ("albums", "Albums"),
     ("artists", "Artists"),
     ("genres", "Genres"),
+    ("composers", "Composers"),
     ("tracks", "All tracks"),
     ("playlists", "Playlists"),
     ("recent", "Recently added"),
@@ -31,6 +33,7 @@ enum Node {
     Top(&'static str),
     Artist(String),
     Genre(String),
+    Composer(String),
     Playlist(i64),
     Album { parent: String, aid: String },
     Track { parent: String, path: String },
@@ -70,8 +73,9 @@ fn parse_id(id: &str) -> Option<Node> {
         ("albums" | "recent", [aid, path]) => track(&[top, aid], path),
         ("artists", [name]) => Node::Artist(name.to_string()),
         ("genres", [g]) => Node::Genre(g.to_string()),
-        ("artists" | "genres", [k, aid]) => album(&[top, k], aid),
-        ("artists" | "genres", [k, aid, path]) => track(&[top, k, aid], path),
+        ("composers", [name]) => Node::Composer(name.to_string()),
+        ("artists" | "genres" | "composers", [k, aid]) => album(&[top, k], aid),
+        ("artists" | "genres" | "composers", [k, aid, path]) => track(&[top, k, aid], path),
         ("tracks", [path]) => track(&[top], path),
         ("playlists", [pid]) => Node::Playlist(pid.parse().ok()?),
         ("playlists", [pid, pos]) => Node::PlaylistItem {
@@ -88,6 +92,7 @@ enum Entry {
     Top(&'static str, &'static str, usize),
     Artist(Artist),
     Genre(Genre),
+    Composer(Artist),
     Playlist(Playlist),
     Album { parent: String, album: Album },
     Track { parent: String, track: Track },
@@ -169,6 +174,7 @@ impl Entry {
             Entry::Top(k, _, _) => k.to_string(),
             Entry::Artist(a) => id_of(&["artists", &a.name]),
             Entry::Genre(g) => id_of(&["genres", &g.name]),
+            Entry::Composer(c) => id_of(&["composers", &c.name]),
             Entry::Playlist(p) => id_of(&["playlists", &p.id.to_string()]),
             Entry::Album { parent, album } => format!("{parent}/{}", pct_encode(&album.id)),
             Entry::Track { parent, track } => format!("{parent}/{}", pct_encode(&track.path)),
@@ -184,6 +190,7 @@ impl Entry {
             Entry::Top(..) => "0".into(),
             Entry::Artist(_) => "artists".into(),
             Entry::Genre(_) => "genres".into(),
+            Entry::Composer(_) => "composers".into(),
             Entry::Playlist(_) => "playlists".into(),
             Entry::Album { parent, .. } | Entry::Track { parent, .. } => parent.clone(),
             Entry::PlaylistItem { pid, .. } => id_of(&["playlists", &pid.to_string()]),
@@ -196,7 +203,7 @@ impl Entry {
         match self {
             Entry::Root => container(&id, &parent, TOPS.len(), "Ricercar", "object.container", ""),
             Entry::Top(_, title, n) => container(&id, &parent, *n, title, "object.container", ""),
-            Entry::Artist(a) => {
+            Entry::Artist(a) | Entry::Composer(a) => {
                 let mut extra = String::new();
                 if !a.cover_path.is_empty() {
                     extra.push_str(&art_tag(&track_art(base, &a.cover_path)));
@@ -271,6 +278,7 @@ impl Renderer {
             "albums" => lib.albums(AlbumSort::Title).len(),
             "artists" => lib.artists().len(),
             "genres" => lib.genres().len(),
+            "composers" => lib.composers().len(),
             "tracks" => lib.count() as usize,
             "playlists" => lib.playlists().len(),
             "recent" => lib.recently_added_albums(RECENT_ALBUMS).len(),
@@ -299,6 +307,7 @@ impl Renderer {
             }
             Node::Top("artists") => lib.artists().into_iter().map(Entry::Artist).collect(),
             Node::Top("genres") => lib.genres().into_iter().map(Entry::Genre).collect(),
+            Node::Top("composers") => lib.composers().into_iter().map(Entry::Composer).collect(),
             Node::Top("playlists") => lib.playlists().into_iter().map(Entry::Playlist).collect(),
             Node::Top("tracks") => lib
                 .tracks(TrackSort::Artist)
@@ -311,6 +320,7 @@ impl Renderer {
             Node::Top(_) => return None,
             Node::Artist(name) => albums(id_of(&["artists", name]), lib.artist_albums(name).0),
             Node::Genre(g) => albums(id_of(&["genres", g]), lib.genre_albums(g)),
+            Node::Composer(name) => albums(id_of(&["composers", name]), lib.composer_albums(name)),
             Node::Playlist(pid) => local_playlist_tracks(lib, *pid)
                 .into_iter()
                 .enumerate()
@@ -351,6 +361,11 @@ impl Renderer {
                 lib.genres()
                     .into_iter()
                     .find(|x| x.name.eq_ignore_ascii_case(g))?,
+            ),
+            Node::Composer(name) => Entry::Composer(
+                lib.composers()
+                    .into_iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(name))?,
             ),
             Node::Playlist(pid) => Entry::Playlist(lib.playlist(*pid)?),
             Node::Album { parent, aid } => Entry::Album {

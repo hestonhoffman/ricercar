@@ -89,7 +89,7 @@ fn hierarchy_paging_metadata() {
     let p = r.port();
 
     let root = children(p, "0");
-    assert_eq!(field(&root, "TotalMatches"), "6");
+    assert_eq!(field(&root, "TotalMatches"), "7");
     let didl = field(&root, "Result");
     assert_eq!(
         ids(&didl),
@@ -97,6 +97,7 @@ fn hierarchy_paging_metadata() {
             "albums",
             "artists",
             "genres",
+            "composers",
             "tracks",
             "playlists",
             "recent"
@@ -150,7 +151,7 @@ fn hierarchy_paging_metadata() {
     // BrowseMetadata for any id.
     let meta = field(&browse(p, "0", "BrowseMetadata", 0, 0), "Result");
     assert_eq!(attr(&meta, "<container", "parentID"), "-1");
-    assert_eq!(attr(&meta, "<container", "childCount"), "6");
+    assert_eq!(attr(&meta, "<container", "childCount"), "7");
     let meta = browse(p, &album_id, "BrowseMetadata", 0, 0);
     assert_eq!(field(&meta, "TotalMatches"), "1");
     let meta = field(&meta, "Result");
