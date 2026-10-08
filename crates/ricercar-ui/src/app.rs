@@ -869,6 +869,7 @@ fn restore_state(ui: &Rc<Ui>) -> (Page, String) {
     app.set_track_sort(st.track_sort);
     app.set_albums_hires_only(st.albums_hires_only);
     app.set_queue_open(st.queue_open);
+    app.set_sidebar_width(crate::ui_state::sidebar_width(&st));
     let win = ui.window.window();
     if let Some(w) = &st.window {
         if let Some((width, height)) = crate::ui_state::usable_size(w) {
@@ -924,6 +925,7 @@ pub fn current_state(ui: &Ui) -> UiState {
         track_sort: app.get_track_sort(),
         albums_hires_only: app.get_albums_hires_only(),
         queue_open: app.get_queue_open(),
+        sidebar_width: app.get_sidebar_width(),
         recent_searches: saved.recent_searches,
         dac_caps: saved.dac_caps,
         device_names: saved.device_names,

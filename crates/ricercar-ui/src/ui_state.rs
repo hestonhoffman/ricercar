@@ -30,6 +30,8 @@ pub struct UiState {
     pub track_sort: i32,
     pub albums_hires_only: bool,
     pub queue_open: bool,
+    /// Logical width of the sidebar.
+    pub sidebar_width: f32,
     /// Most recent first.
     pub recent_searches: Vec<String>,
     /// Last known capabilities of each hw: device.
@@ -38,6 +40,11 @@ pub struct UiState {
     /// most recent first: a device that is not connected keeps its name.
     pub device_names: Vec<(String, String)>,
 }
+
+/// Sidebar width: default and bounds, as in `chrome.slint`.
+pub const SIDEBAR_DEFAULT: f32 = 240.0;
+pub const SIDEBAR_MIN: f32 = 180.0;
+pub const SIDEBAR_MAX: f32 = 480.0;
 
 /// How many PipeWire output names are remembered.
 pub const DEVICE_NAMES_MAX: usize = 50;
@@ -52,6 +59,7 @@ impl Default for UiState {
             track_sort: 0,
             albums_hires_only: false,
             queue_open: false,
+            sidebar_width: SIDEBAR_DEFAULT,
             recent_searches: Vec::new(),
             dac_caps: Default::default(),
             device_names: Vec::new(),
@@ -183,6 +191,16 @@ pub fn start_page(
     }
 }
 
+/// The saved sidebar width, within bounds; the default when unusable.
+pub fn sidebar_width(st: &UiState) -> f32 {
+    let w = st.sidebar_width;
+    if w.is_finite() {
+        w.clamp(SIDEBAR_MIN, SIDEBAR_MAX)
+    } else {
+        SIDEBAR_DEFAULT
+    }
+}
+
 /// A saved size is only reused when it is plausible (not a collapsed or
 /// absurd window from a broken session).
 pub fn usable_size(w: &WindowState) -> Option<(f32, f32)> {
@@ -212,6 +230,7 @@ mod tests {
             track_sort: 2,
             albums_hires_only: true,
             queue_open: true,
+            sidebar_width: 312.0,
             recent_searches: vec!["bach".into()],
             ..Default::default()
         };
@@ -227,6 +246,21 @@ mod tests {
         assert_eq!((st.page(), st.track_sort, st.window), (Page::Home, 3, None));
         std::fs::write(&p, "not json").unwrap();
         assert_eq!(UiState::load(&p), UiState::default());
+    }
+
+    #[test]
+    fn sidebar_width_stays_in_bounds() {
+        let with = |w| {
+            sidebar_width(&UiState {
+                sidebar_width: w,
+                ..Default::default()
+            })
+        };
+        assert_eq!(sidebar_width(&UiState::default()), SIDEBAR_DEFAULT);
+        assert_eq!(with(300.0), 300.0);
+        assert_eq!(with(20.0), SIDEBAR_MIN);
+        assert_eq!(with(5000.0), SIDEBAR_MAX);
+        assert_eq!(with(f32::NAN), SIDEBAR_DEFAULT);
     }
 
     #[test]

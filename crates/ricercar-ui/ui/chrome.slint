@@ -126,7 +126,7 @@ component NavItem inherits Rectangle {
 export component Sidebar inherits Rectangle {
     callback focus-search();
     callback new-playlist();
-    width: 240px;
+    width: App.sidebar-width;
     background: Theme.panel;
     public function focus-search-field() {
         search.focus-field();
@@ -354,6 +354,25 @@ export component Sidebar inherits Rectangle {
         }
     }
     Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
+    // Drag the right edge to resize; double-click for the default width.
+    Rectangle {
+        x: parent.width - self.width;
+        width: 6px;
+        Rectangle {
+            x: parent.width - self.width;
+            width: grip.has-hover || grip.pressed ? 2px : 0px;
+            background: Theme.accent;
+        }
+        grip := TouchArea {
+            mouse-cursor: ew-resize;
+            moved => {
+                if self.pressed {
+                    App.sidebar-width = max(180px, min(480px, App.sidebar-width + self.mouse-x - self.pressed-x));
+                }
+            }
+            double-clicked => { App.sidebar-width = 240px; }
+        }
+    }
 }
 
 /// Signal path popover content: source → decoder → container → device.

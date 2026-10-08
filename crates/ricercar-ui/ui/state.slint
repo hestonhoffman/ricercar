@@ -274,6 +274,8 @@ export global App {
     in property <bool> can-forward;
     in-out property <bool> now-playing-open;
     in-out property <bool> queue-open;
+    // dragged from its right edge, kept in ui-state.json
+    in-out property <length> sidebar-width: 240px;
     in-out property <int> np-tab; // 0 lyrics, 1 queue, 2 signal path
     callback navigate(Page, string);
     callback back();
