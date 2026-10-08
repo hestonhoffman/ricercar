@@ -122,6 +122,10 @@ msgid "Playlists"
 msgstr "プレイリスト"
 
 msgctxt "Sidebar"
+msgid "Refresh plugin playlists"
+msgstr "プラグインのプレイリストを更新"
+
+msgctxt "Sidebar"
 msgid "New playlist"
 msgstr "新規プレイリスト"
 

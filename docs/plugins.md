@@ -373,8 +373,14 @@ page, and it has no sidebar section of its own. A plugin that only declares
 - Pages of at most 200. The order does not matter: the host sorts.
 - The host reads every page (up to 20 000 items per list) after sign-in
   and keeps the lists **in memory** for the session, to sort and merge them
-  with the local library; they are read again after a new sign-in or when
-  the user asks to refresh. Nothing is written to disk.
+  with the local library; they are read again after a new sign-in, when
+  the user asks to refresh (the button next to **Playlists**), when the
+  window gets the focus back (at most every 5 minutes), and when the
+  plugin says so. Nothing is written to disk.
+- `library.changed` (plugin → host, notification, no params): the user's
+  library changed outside the host, for example a playlist made or
+  followed on the service's website. The host reads the lists again.
+  Send it only on a real change; the host reads every list each time.
 - For the host's album and artist pages, an album's `artist`, `year` and
   `art`, and an artist's `art`, should be filled in; an album's tracks
   come from `browse.list` on its `ref`, an artist's albums likewise.

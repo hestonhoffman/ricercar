@@ -23,7 +23,8 @@
 //! word, plain for track 2, track 3 instrumental), album/artist/label refs, actions (a "play" radio and a
 //! "browse" similar albums), favourite flags, two playlists (one editable,
 //! with entry ids and every `playlists.*` method), details, `radio.next`,
-//! and `delivery: "proxied"` for the tracks of album 2.
+//! and `delivery: "proxied"` for the tracks of album 2. A created playlist
+//! is followed by `library.changed`.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
@@ -975,6 +976,10 @@ fn main() {
             Err(e) => json!({"jsonrpc": "2.0", "id": id, "error": e}),
         };
         send(reply);
+        // As a service that tells its clients about a new playlist.
+        if method == "playlists.create" {
+            send(json!({"jsonrpc": "2.0", "method": "library.changed", "params": {}}));
+        }
         // Choices that depend on the account: declared again once it is
         // known, and whenever it changes.
         if matches!(

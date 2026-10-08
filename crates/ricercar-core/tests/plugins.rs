@@ -633,12 +633,16 @@ fn playlist_editing() {
     ));
     assert!(!rig.log().contains("playlists.rename"));
 
+    let rev = || h.status("demo").unwrap().library_rev;
+    assert_eq!(rev(), 0);
     let created = h
         .playlist_create("demo", "  Road trip ", None, Some(false))
         .unwrap();
     assert_eq!(created.value.title, "Road trip");
     assert!(created.value.editable);
     assert_eq!(created.playlists.as_ref().unwrap().len(), 3);
+    // The plugin's `library.changed` marks the lists read before as stale.
+    assert!(wait(10, || rev() == 1));
     let p = created.value.reference.clone();
 
     let e = h

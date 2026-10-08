@@ -87,6 +87,10 @@ pub struct PluginsView {
     /// order, and the ones being read.
     libs: Vec<PluginLib>,
     loading_libs: std::collections::HashSet<String>,
+    /// Bumped to read every library again ([`reload_libraries`]), and
+    /// when that last happened.
+    lib_epoch: u64,
+    libs_read_at: Option<std::time::Instant>,
     /// Cover key (art URL) of the plugin album on the album page.
     pub album_art: Option<String>,
     /// `home` entries of each plugin's `browse.root`, and the Home shelves
@@ -173,6 +177,9 @@ struct SearchPart {
 pub struct PluginLib {
     pub id: String,
     pub name: String,
+    /// The plugin's `library_rev` and our `lib_epoch` when read: the lists
+    /// are read again once either moved on.
+    stamp: (u64, u64),
     pub albums: Vec<Item>,
     pub artists: Vec<Item>,
     pub tracks: Vec<Item>,
@@ -1959,13 +1966,16 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
         load_home_shelves(ui);
     }
     for s in ready {
-        let known = {
+        let stamp = (s.library_rev, ui.plugins.borrow().lib_epoch);
+        let current = {
             let pv = ui.plugins.borrow();
-            pv.libs.iter().any(|l| l.id == s.id) || pv.loading_libs.contains(&s.id)
+            pv.libs.iter().any(|l| l.id == s.id && l.stamp == stamp)
+                || pv.loading_libs.contains(&s.id)
         };
-        if known {
+        if current {
             continue;
         }
+        // A list read again replaces the old one once complete.
         ui.plugins.borrow_mut().loading_libs.insert(s.id.clone());
         let (h, id, name) = (host(ui), s.id.clone(), s.name.clone());
         std::thread::spawn(move || {
@@ -1975,6 +1985,7 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                 Ok::<_, PluginError>(PluginLib {
                     id: id.clone(),
                     name,
+                    stamp,
                     albums: read(LibraryList::Albums)?,
                     artists: read(LibraryList::Artists)?,
                     tracks: read(LibraryList::Tracks)?,
@@ -1990,10 +2001,11 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                 match r {
                     Ok(lib) => {
                         tracing::info!(
-                            "plugin[{id}] library: {} albums, {} artists, {} tracks",
+                            "plugin[{id}] library: {} albums, {} artists, {} tracks, {} playlists",
                             lib.albums.len(),
                             lib.artists.len(),
-                            lib.tracks.len()
+                            lib.tracks.len(),
+                            lib.playlists.len()
                         );
                         for list in [&lib.albums, &lib.artists, &lib.tracks, &lib.playlists] {
                             crate::plugin_favs::remember(ui, &id, list);
@@ -2003,6 +2015,7 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                         let mut pv = ui.plugins.borrow_mut();
                         pv.libs.retain(|l| l.id != id);
                         pv.libs.push(lib);
+                        pv.libs_read_at = Some(std::time::Instant::now());
                         pv.libs
                             .sort_by_key(|l| order.iter().position(|o| *o == l.id));
                         drop(pv);
@@ -2010,6 +2023,8 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
                         reload_library_page(ui);
                         rebuild_nav(ui);
                         load_home_shelves(ui);
+                        // Asked again while this read ran: read once more.
+                        refresh_libraries(ui, &host(ui).statuses());
                     }
                     Err(e) => tracing::warn!("plugin[{id}] library: {e}"),
                 }
@@ -2017,6 +2032,29 @@ fn refresh_libraries(ui: &Rc<Ui>, statuses: &[PluginStatus]) {
         });
     }
 }
+
+/// Read the library lists of every signed-in plugin again, at most once
+/// per [`LIBS_REREAD_MIN`] unless `forced` (the user asked): what changed
+/// on the service meanwhile (a playlist made on its website) shows up.
+pub fn reload_libraries(ui: &Rc<Ui>, forced: bool) {
+    {
+        let mut pv = ui.plugins.borrow_mut();
+        if pv.libs.is_empty()
+            || (!forced
+                && pv
+                    .libs_read_at
+                    .is_some_and(|t| t.elapsed() < LIBS_REREAD_MIN))
+        {
+            return;
+        }
+        pv.lib_epoch += 1;
+        pv.libs_read_at = Some(std::time::Instant::now());
+    }
+    refresh_libraries(ui, &host(ui).statuses());
+}
+
+/// Window focus reads the libraries again no more often than this.
+const LIBS_REREAD_MIN: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 fn reload_library_page(ui: &Rc<Ui>) {
     let page = ui.app().get_page();
@@ -2988,6 +3026,7 @@ pub fn wire(ui: &Rc<Ui>) {
         with_ui(|ui| create_playlist(ui, location, &name, pending))
     });
     app.on_plugin_update(|id| with_ui(|ui| confirm_install(ui, &id, true)));
+    app.on_plugin_libraries_reload(|| with_ui(|ui| reload_libraries(ui, true)));
     app.on_plugin_remove(|id| with_ui(|ui| remove(ui, &id)));
     app.on_catalog_install(|id| with_ui(|ui| confirm_install(ui, &id, false)));
     app.on_catalog_filter_edited(|_| with_ui(|ui| refresh_catalog_rows(ui)));

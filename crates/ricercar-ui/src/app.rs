@@ -964,7 +964,8 @@ fn save_final_state(ui: &Ui, st: UiState) {
 /// Touchpads send many small scroll events. Slint animates each one and
 /// adds what is left of the previous animation, so a touchpad swipe runs
 /// away; hand those to Slint as plain scroll events instead (applied as
-/// they come, no animation). Mouse wheels keep the smooth scroll.
+/// they come, no animation). Mouse wheels keep the smooth scroll. Also
+/// reads the plugin libraries again when the window gets the focus.
 fn smooth_touchpad(window: &MainWindow) {
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
     let cursor = std::cell::Cell::new(slint::LogicalPosition::default());
@@ -988,6 +989,13 @@ fn smooth_touchpad(window: &MainWindow) {
                     delta_y: d.y,
                 });
                 EventResult::PreventDefault
+            }
+            // Back to the window: what changed on the services meanwhile.
+            winit::event::WindowEvent::Focused(true) => {
+                slint::Timer::single_shot(std::time::Duration::ZERO, || {
+                    with_ui(|ui| crate::plugins::reload_libraries(ui, false))
+                });
+                EventResult::Propagate
             }
             _ => EventResult::Propagate,
         });

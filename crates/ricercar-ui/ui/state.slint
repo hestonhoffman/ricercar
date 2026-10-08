@@ -389,6 +389,8 @@ export global App {
     in property <[PluginNav]> plugin-playlists;
     // a plugin's library is in the pages (Home is not "empty" then)
     in property <bool> plugin-library;
+    // read the plugins' playlists (and the rest of their library) again
+    callback plugin-libraries-reload();
     in property <int> lib-tracks;
     in property <int> lib-albums;
     in property <int> lib-artists;

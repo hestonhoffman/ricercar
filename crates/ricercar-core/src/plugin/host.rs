@@ -79,6 +79,9 @@ pub struct PluginStatus {
     pub settings: Vec<Setting>,
     /// The value in effect for each of them.
     pub values: serde_json::Map<String, Value>,
+    /// Counts the plugin's `library.changed` notifications: the library
+    /// lists read before a change are out of date.
+    pub library_rev: u64,
 }
 
 impl PluginStatus {
@@ -92,6 +95,7 @@ impl PluginStatus {
             auth: None,
             settings: Vec::new(),
             values: serde_json::Map::new(),
+            library_rev: 0,
         }
     }
 
@@ -1314,6 +1318,9 @@ impl PluginHost {
                     st.settings = schema;
                     slot.declared.store(true, Ordering::SeqCst);
                     drop(st);
+                    self.touch();
+                } else if method == "library.changed" {
+                    slot.status.write().unwrap().library_rev += 1;
                     self.touch();
                 } else if method == "auth.changed" {
                     match serde_json::from_value::<AuthStatus>(params.clone()) {

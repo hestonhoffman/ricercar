@@ -123,6 +123,10 @@ msgid "Playlists"
 msgstr "Playlists"
 
 msgctxt "Sidebar"
+msgid "Refresh plugin playlists"
+msgstr "Playlists der Plugins aktualisieren"
+
+msgctxt "Sidebar"
 msgid "New playlist"
 msgstr "Neue Playlist"
 

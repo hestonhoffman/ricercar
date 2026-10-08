@@ -265,6 +265,13 @@ export component Sidebar inherits Rectangle {
                 vertical-alignment: center;
                 horizontal-stretch: 1;
             }
+            if App.plugin-library: IconButton {
+                icon: Icons.refresh-cw;
+                size: 26px;
+                icon-size: 14px;
+                tooltip: @tr("Refresh plugin playlists");
+                clicked => { App.plugin-libraries-reload(); }
+            }
             IconButton {
                 icon: Icons.plus;
                 size: 26px;
