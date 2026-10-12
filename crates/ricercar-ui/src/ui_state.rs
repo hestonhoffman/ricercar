@@ -28,6 +28,8 @@ pub struct UiState {
     pub page_arg: String,
     pub album_sort: i32,
     pub track_sort: i32,
+    /// Display order of playlists (`PlaylistSort::from_index`).
+    pub playlist_sort: i32,
     pub albums_hires_only: bool,
     pub queue_open: bool,
     /// Logical width of the sidebar.
@@ -57,6 +59,7 @@ impl Default for UiState {
             page_arg: String::new(),
             album_sort: 0,
             track_sort: 0,
+            playlist_sort: 0,
             albums_hires_only: false,
             queue_open: false,
             sidebar_width: SIDEBAR_DEFAULT,

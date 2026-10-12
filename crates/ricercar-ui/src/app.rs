@@ -255,6 +255,8 @@ pub struct State {
     pub hist_pos: usize,
     /// Tracks behind each track list, for activation and menus.
     pub lists: HashMap<String, Vec<Track>>,
+    /// The open local playlist as shown: the stored position of each row.
+    pub pl_order: Vec<usize>,
     /// Albums behind album models, by album id.
     pub albums: HashMap<String, Album>,
     pub artists: Vec<Artist>,
@@ -867,6 +869,7 @@ fn restore_state(ui: &Rc<Ui>) -> (Page, String) {
     let app = ui.app();
     app.set_album_sort(st.album_sort);
     app.set_track_sort(st.track_sort);
+    app.set_playlist_sort(st.playlist_sort);
     app.set_albums_hires_only(st.albums_hires_only);
     app.set_queue_open(st.queue_open);
     app.set_sidebar_width(crate::ui_state::sidebar_width(&st));
@@ -923,6 +926,7 @@ pub fn current_state(ui: &Ui) -> UiState {
         page_arg: arg,
         album_sort: app.get_album_sort(),
         track_sort: app.get_track_sort(),
+        playlist_sort: app.get_playlist_sort(),
         albums_hires_only: app.get_albums_hires_only(),
         queue_open: app.get_queue_open(),
         sidebar_width: app.get_sidebar_width(),

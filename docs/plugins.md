@@ -309,6 +309,7 @@ Every entry a plugin returns is an **item**:
     {"id": "similar", "label": "Similar albums", "ref": "similar/album/77", "kind": "browse"}
   ],
   "entry_id": "e-5531",           // tracks listed by a playlist, see Playlist editing
+  "added_at": 1714588200,         // tracks listed by a playlist: when added, see below
   "editable": false               // playlists, see Playlist editing
 }
 ```
@@ -337,6 +338,19 @@ Every entry a plugin returns is an **item**:
   entries with an unknown `kind`, an empty or overlong label (80
   characters) or a bad `ref`. An `actions` that is not a list (a string,
   an object) counts as no actions, without a warning.
+
+- `added_at`, on the tracks of a playlist's `browse.list`: when the track
+  was added to that playlist, as Unix seconds (a number) or an RFC 3339
+  date and time with its offset (`"2024-05-01T18:30:00Z"`). The user can
+  show a playlist sorted by *Recently added*; the host then reads every
+  page of it (up to 5000 tracks), newest first. A track without a date
+  counts as older than any dated one, the later in the playlist the more
+  recent, so a plugin that cannot tell still gets the usual "appended last"
+  order. Another value (a date without time, a string the host cannot
+  read) counts as no date; the item is kept.
+- Sorting only changes what the page shows and plays, never the playlist
+  on the service. While a playlist is shown sorted, the host does not
+  offer to move its entries.
 
 ## Browsing and search
 

@@ -2,7 +2,7 @@ import { ScrollView, ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { App, Page, AlbumCard, TrackRow } from "state.slint";
-import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, ArtistTile, AlbumTile, EmptyState, FocusRing } from "widgets.slint";
+import { Icon, IconButton, Button, Badge, Cover, SectionTitle, Segmented, Dropdown, ArtistTile, AlbumTile, EmptyState, FocusRing } from "widgets.slint";
 import { TrackTable, TrackListView, AlbumShelf, AlbumGrid, AlbumFlow, TrackMenu, BrowseContent } from "lists.slint";
 import { Biography, DetailShelves } from "details.slint";
 
@@ -91,6 +91,8 @@ export component ActionBar inherits HorizontalLayout {
     // "" for no menu
     in property <string> menu-id;
     in property <bool> menu-plugin;
+    // a playlist: the sort menu at the end of the bar
+    in property <bool> sortable;
     callback play();
     callback shuffle();
     callback toggle-fav();
@@ -143,6 +145,16 @@ export component ActionBar inherits HorizontalLayout {
                 TrackMenu.keyboard = self.keyboard-focus;
                 TrackMenu.album-serial += 1;
             }
+        }
+    }
+    if sortable: VerticalLayout {
+        alignment: center;
+        Dropdown {
+            width: 190px;
+            label: @tr("Sort");
+            options: [@tr("Playlist order"), @tr("Recently added"), @tr("Title"), @tr("Artist"), @tr("Album"), @tr("Length")];
+            selected <=> App.playlist-sort;
+            changed => { App.playlist-sort-changed(); }
         }
     }
 }
@@ -1133,6 +1145,7 @@ export component PlaylistPage inherits PageScroll {
         padding-right: 32px;
         padding-bottom: 16px;
         menu-id: App.pl-card;
+        sortable: App.pl-tracks.length > 1;
         play => { App.playlist-play(App.pl-id, false); }
         shuffle => { App.playlist-play(App.pl-id, true); }
         queue => { App.album-action(App.pl-card, "queue"); }

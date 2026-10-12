@@ -221,6 +221,15 @@ pub struct Item {
     /// playlist (a track may appear twice), for `playlists.remove` and
     /// `playlists.move`.
     pub entry_id: Option<String>,
+    /// Tracks listed by a playlist: when they were added to it, in Unix
+    /// seconds (the plugin may send seconds or an RFC 3339 date). Used to
+    /// sort the playlist by "Recently added"; an unreadable value counts
+    /// as none.
+    #[serde(
+        deserialize_with = "lenient_added",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub added_at: Option<i64>,
     /// Playlists: the user may edit it (`playlist_edit`).
     pub editable: bool,
 }
@@ -278,6 +287,13 @@ fn lenient_actions<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Action>
                 .collect()
         })
         .unwrap_or_default())
+}
+
+/// `added_at`: seconds or an RFC 3339 date; anything else is no date,
+/// not a bad item.
+fn lenient_added<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.as_ref().and_then(crate::playlist_sort::parse_added))
 }
 
 /// A ref the host accepts: not empty, at most [`MAX_REF`] bytes.
@@ -599,8 +615,10 @@ mod tests {
         );
         let items = items_of(Some(&serde_json::json!([{
             "ref": "t", "title": "T", "album_ref": "album/1", "artist_ref": "",
-            "label_ref": long, "favorite": true, "actions": actions, "entry_id": "e1"
-        }, {"ref": "p", "kind": "playlist", "title": "P", "editable": true, "actions": "nope"}])));
+            "label_ref": long, "favorite": true, "actions": actions, "entry_id": "e1",
+            "added_at": "2024-05-01T18:30:00Z"
+        }, {"ref": "p", "kind": "playlist", "title": "P", "editable": true, "actions": "nope",
+            "added_at": {"when": "never"}}])));
         let t = &items[0];
         assert_eq!(t.album_ref.as_deref(), Some("album/1"));
         assert_eq!(
@@ -609,6 +627,8 @@ mod tests {
         );
         assert_eq!(t.favorite, Some(true));
         assert_eq!(t.entry_id.as_deref(), Some("e1"));
+        assert_eq!(t.added_at, Some(1714588200));
+        assert_eq!(items[1].added_at, None);
         assert_eq!(t.actions.len(), MAX_ACTIONS);
         assert_eq!(t.actions[0].id, "a0");
         assert!(items[1].editable && items[1].actions.is_empty());

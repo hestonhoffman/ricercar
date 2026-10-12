@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use ricercar_core::library::Track;
+use ricercar_core::playlist_sort::PlaylistSort;
 use ricercar_core::plugin::{
     AuthState, Item, ItemKind, PluginError, PluginStatus, RunState, catalog, source,
 };
@@ -795,6 +796,12 @@ pub fn load_browse(ui: &Rc<Ui>, arg: &str) {
     crate::plugin_favs::show_browse(ui, &id, &reference);
     app.set_br_editable(false);
     app.set_br_can_move(false);
+    let is_playlist = ui
+        .plugins
+        .borrow()
+        .lookup(&id, &reference)
+        .is_some_and(|it| it.kind == ItemKind::Playlist);
+    app.set_br_playlist(is_playlist);
     let serial = {
         let mut pv = ui.plugins.borrow_mut();
         pv.browse_serial += 1;
@@ -817,16 +824,25 @@ fn reload_browse(ui: &Rc<Ui>) {
 /// Read a page of the browse list from `offset`. `replace`: read the list
 /// again from the start (as much as was shown, a page at least) and swap it
 /// in at once, keeping the page in place (after a playlist edit).
+///
+/// A playlist sorted other than in its own order is read whole (up to
+/// `PLAY_MAX` tracks) and shown sorted, without "load more".
 fn fetch_page(ui: &Ui, serial: u64, id: String, reference: String, offset: usize, replace: bool) {
     let limit = if replace {
         ui.models.br_tracks.row_count().clamp(PAGE, 200)
     } else {
         PAGE
     };
+    let sort = browse_sort(ui);
+    let replace = replace || sort.is_some();
     ui.app().set_br_loading(true);
     let h = host(ui);
     std::thread::spawn(move || {
-        let r = h.browse_list(&id, &reference, offset, limit);
+        let r = match sort {
+            Some(sort) => read_all(&h, &id, &reference, PLAY_MAX)
+                .map(|(items, more)| (sort_items(&id, items, sort), None, more)),
+            None => h.browse_list(&id, &reference, offset, limit),
+        };
         post(move |ui| {
             if ui.plugins.borrow().browse_serial != serial {
                 return;
@@ -847,6 +863,9 @@ fn fetch_page(ui: &Ui, serial: u64, id: String, reference: String, offset: usize
                         .iter()
                         .filter(|i| i.kind == ItemKind::Track)
                         .map(|i| i.entry_id.clone());
+                    // Entries: a playlist even when it was not seen listed.
+                    let found_playlist =
+                        !app.get_br_playlist() && items.iter().any(|i| i.entry_id.is_some());
                     if replace {
                         set_rows(&ui.models.br_cards, cards);
                         set_rows(&ui.models.br_tracks, track_rows(ui, &tracks, row_opts(0)));
@@ -862,9 +881,20 @@ fn fetch_page(ui: &Ui, serial: u64, id: String, reference: String, offset: usize
                             list.extend(tracks);
                         }
                     }
-                    app.set_br_more(more);
+                    // Sorted: the whole list is there.
+                    app.set_br_more(more && sort.is_none());
                     if let Some(b) = ui.plugins.borrow_mut().browse.as_mut() {
-                        b.2 = offset + items.len();
+                        b.2 = if sort.is_some() {
+                            items.len()
+                        } else {
+                            offset + items.len()
+                        };
+                    }
+                    if found_playlist {
+                        app.set_br_playlist(true);
+                        if browse_sort(ui).is_some() {
+                            refresh_browse(ui);
+                        }
                     }
                 }
                 Err(e) => {
@@ -1006,6 +1036,60 @@ fn gather(
     Ok(out)
 }
 
+/// Every item of a list, its pages read up to `max` items, and whether
+/// more were left.
+fn read_all(
+    h: &ricercar_core::plugin::PluginHost,
+    id: &str,
+    reference: &str,
+    max: usize,
+) -> Result<(Vec<Item>, bool), PluginError> {
+    let mut out: Vec<Item> = Vec::new();
+    loop {
+        let (items, _, more) = h.browse_list(id, reference, out.len(), 200)?;
+        let empty = items.is_empty();
+        out.extend(items);
+        if !more || empty {
+            return Ok((out, false));
+        }
+        if out.len() >= max {
+            out.truncate(max);
+            return Ok((out, true));
+        }
+    }
+}
+
+/// A playlist's items in the display order `sort`: its tracks sorted,
+/// after anything else it lists.
+fn sort_items(id: &str, items: Vec<Item>, sort: PlaylistSort) -> Vec<Item> {
+    let (tracks, mut out): (Vec<Item>, Vec<Item>) =
+        items.into_iter().partition(|i| i.kind == ItemKind::Track);
+    let infos: Vec<Track> = tracks
+        .iter()
+        .map(|i| Track::from_info(&i.to_track_info(id)))
+        .collect();
+    let added: Vec<Option<i64>> = tracks.iter().map(|i| i.added_at).collect();
+    let order = ricercar_core::playlist_sort::order(&infos, &added, sort);
+    let mut tracks: Vec<Option<Item>> = tracks.into_iter().map(Some).collect();
+    out.extend(order.into_iter().filter_map(|i| tracks[i].take()));
+    out
+}
+
+/// The browse page's sort: a plugin playlist in another order than its
+/// own.
+fn browse_sort(ui: &Ui) -> Option<PlaylistSort> {
+    let sort = PlaylistSort::from_index(ui.app().get_playlist_sort());
+    (ui.app().get_br_playlist() && sort != PlaylistSort::Playlist).then_some(sort)
+}
+
+/// The playlist sort changed: show the open plugin playlist again in the
+/// new order.
+pub fn sort_changed(ui: &Ui) {
+    if ui.app().get_br_playlist() {
+        refresh_browse(ui);
+    }
+}
+
 /// Context-menu and double-click actions on a plugin card.
 pub fn card_action(ui: &Rc<Ui>, arg: &str, action: &str) {
     let Some((id, reference, _)) = parse_arg(arg) else {
@@ -1025,9 +1109,27 @@ pub fn card_action(ui: &Rc<Ui>, arg: &str, action: &str) {
     if action == "open" || action == "fav" {
         return;
     }
+    // A playlist plays as its page shows it.
+    let sort = Some(PlaylistSort::from_index(ui.app().get_playlist_sort()))
+        .filter(|s| *s != PlaylistSort::Playlist)
+        .filter(|_| {
+            ui.plugins
+                .borrow()
+                .lookup(&id, &reference)
+                .is_some_and(|it| it.kind == ItemKind::Playlist)
+        });
     let (h, action) = (host(ui), action.to_string());
     std::thread::spawn(move || {
-        let r = all_tracks(&h, &id, &reference, PLAY_MAX);
+        let r = match sort {
+            Some(sort) => read_all(&h, &id, &reference, PLAY_MAX).map(|(items, _)| {
+                sort_items(&id, items, sort)
+                    .iter()
+                    .filter(|i| i.is_playable())
+                    .map(|i| i.to_track_info(&id))
+                    .collect()
+            }),
+            None => all_tracks(&h, &id, &reference, PLAY_MAX),
+        };
         post(move |ui| match r {
             Ok(infos) if !infos.is_empty() => match action.as_str() {
                 a if a.starts_with("pl:") => {

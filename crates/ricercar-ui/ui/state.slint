@@ -499,6 +499,11 @@ export global App {
     in property <string> pl-duration;
     in property <image> pl-cover;
     in property <[TrackRow]> pl-tracks;
+    // Display order of every playlist, local or from a plugin (see
+    // `playlist_sort.rs`): playlist order, recently added, title, artist,
+    // album, length.
+    in-out property <int> playlist-sort;
+    callback playlist-sort-changed();
     callback playlist-create(string);
     callback playlist-rename(int, string);
     callback playlist-delete(int);
@@ -737,6 +742,8 @@ export global App {
     // entries), and its entries can be moved
     in property <bool> br-editable;
     in property <bool> br-can-move;
+    // the list is a plugin playlist: it can be sorted
+    in property <bool> br-playlist;
     callback br-playlist-rename(string);
     callback br-playlist-delete();
     // plugins still searching ("Jellyfin, Demo"), and their errors

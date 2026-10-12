@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use ricercar_core::library::{AlbumSort, Track, TrackSort};
+use ricercar_core::playlist_sort::{self, PlaylistSort};
 use ricercar_core::plugin::Item;
 use ricercar_core::{EnqueueAt, PlayContext, TrackInfo};
 use slint::{Model, ModelRc, SharedString, VecModel};
@@ -470,11 +471,22 @@ fn load_composer(ui: &Rc<Ui>, name: &str) {
     ui.st.borrow_mut().lists.insert("composer".into(), tracks);
 }
 
+/// A local playlist's tracks in the chosen display order, and the stored
+/// position of each.
+pub fn sorted_playlist(ui: &Ui, id: i64) -> (Vec<Track>, Vec<usize>) {
+    let (tracks, added): (Vec<Track>, Vec<Option<i64>>) =
+        ui.ctx.lib.playlist_entries(id).into_iter().unzip();
+    let sort = PlaylistSort::from_index(ui.app().get_playlist_sort());
+    let order = playlist_sort::order(&tracks, &added, sort);
+    let sorted = order.iter().map(|&i| tracks[i].clone()).collect();
+    (sorted, order)
+}
+
 fn load_playlist(ui: &Rc<Ui>, id: i64) {
     let lib = &ui.ctx.lib;
     let app = ui.app();
     let Some(p) = lib.playlist(id) else { return };
-    let tracks = lib.playlist_tracks(id);
+    let (tracks, order) = sorted_playlist(ui, id);
     app.set_pl_id(id as i32);
     app.set_pl_card(format!("{PLAYLIST_CARD}{id}").into());
     app.set_pl_name(p.name.into());
@@ -488,7 +500,12 @@ fn load_playlist(ui: &Rc<Ui>, id: i64) {
         }
         .into(),
     );
-    let cover = tracks.first().map(|t| {
+    // The playlist's own first track, whatever the sort.
+    let first = order
+        .iter()
+        .position(|&i| i == 0)
+        .and_then(|i| tracks.get(i));
+    let cover = first.map(|t| {
         ui.cover(
             &t.album_id,
             Source::Track {
@@ -501,7 +518,9 @@ fn load_playlist(ui: &Rc<Ui>, id: i64) {
     });
     app.set_pl_cover(cover.unwrap_or_default());
     set_rows(&ui.models.pl_tracks, track_rows(ui, &tracks, opts(true)));
-    ui.st.borrow_mut().lists.insert("playlist".into(), tracks);
+    let mut st = ui.st.borrow_mut();
+    st.lists.insert("playlist".into(), tracks);
+    st.pl_order = order;
 }
 
 pub fn refresh_playlists(ui: &Rc<Ui>) {
@@ -777,7 +796,9 @@ pub fn track_action(ui: &Rc<Ui>, list: &str, index: usize, action: &str) {
         "folder" => show_in_folder(&tr.path),
         "pl-remove" => {
             let id = ui.app().get_pl_id() as i64;
-            ui.ctx.lib.remove_from_playlist(id, &[index]);
+            // The row as shown; its place in the playlist when sorted.
+            let pos = ui.st.borrow().pl_order.get(index).copied();
+            ui.ctx.lib.remove_from_playlist(id, &[pos.unwrap_or(index)]);
             load_playlist(ui, id);
             refresh_playlists(ui);
             ui.toast(t("Removed from the playlist"), false);
@@ -903,7 +924,7 @@ pub fn album_action(ui: &Rc<Ui>, id: &str, action: &str) {
         if action == "export" {
             return export_playlist(ui, pid);
         }
-        let tracks = lib.playlist_tracks(pid);
+        let (tracks, _) = sorted_playlist(ui, pid);
         if tracks.is_empty() {
             return;
         }
@@ -997,6 +1018,19 @@ pub fn wire(ui: &Rc<Ui>) {
     });
     app.on_albums_sort_changed(|| with_ui(load_albums));
     app.on_tracks_sort_changed(|| with_ui(|ui| load(ui, Page::Tracks, "")));
+    app.on_playlist_sort_changed(|| {
+        with_ui(|ui| {
+            crate::app::save_state(ui);
+            match ui.app().get_page() {
+                Page::Playlist => {
+                    let id = ui.app().get_pl_id() as i64;
+                    load_playlist(ui, id);
+                }
+                Page::Browse => crate::plugins::sort_changed(ui),
+                _ => {}
+            }
+        })
+    });
     app.on_shuffle_all(|| {
         with_ui(|ui| {
             let tracks = ui.ctx.lib.random_tracks(300);
@@ -1062,7 +1096,7 @@ pub fn wire(ui: &Rc<Ui>) {
     });
     app.on_playlist_play(|id, shuffle| {
         with_ui(|ui| {
-            let tracks = ui.ctx.lib.playlist_tracks(id as i64);
+            let (tracks, _) = sorted_playlist(ui, id as i64);
             let ctx = PlayContext::Playlist(id as i64);
             if shuffle {
                 ui.ctx.ctl.play_shuffled(infos(&tracks), ctx);

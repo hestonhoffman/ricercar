@@ -43,6 +43,7 @@ export component BrowsePage inherits PageScroll {
             fav: App.br-fav;
             menu-id: App.br-menu-id;
             menu-plugin: true;
+            sortable: App.br-playlist && (App.br-tracks.length > 1 || App.playlist-sort != 0);
             play => { App.br-play(false); }
             shuffle => { App.br-play(true); }
             toggle-fav => { App.album-action(App.br-menu-id, "fav"); }

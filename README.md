@@ -88,7 +88,7 @@ Most Linux players either sound right or look right. ricercar tries to do both:
 - Instant accent-insensitive search (`bjork` finds Björk)
 - Albums, artists (with "appears on"), genres, composers, all tracks
 - Favorites, play counts, history, most played
-- Playlists with M3U / M3U8 import & export
+- Playlists with M3U / M3U8 import & export, shown in their own order or sorted (recently added, title, artist, album, length)
 - CUE sheets: an album ripped as one file plays as its tracks, gapless and
   sample-exact
 - SACD images: an `.iso` shows as its album, one track per track of the

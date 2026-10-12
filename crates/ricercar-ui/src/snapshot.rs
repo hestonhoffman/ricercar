@@ -334,11 +334,24 @@ pub fn start(ui: &Rc<Ui>, dir: std::path::PathBuf) {
             ),
         ),
         (
+            // Sorted by length: the sort menu shows the choice.
+            "playlist-sorted",
+            (
+                600,
+                Box::new(|ui| {
+                    close_menu(ui);
+                    ui.app().set_playlist_sort(5);
+                    ui.app().invoke_playlist_sort_changed();
+                }),
+            ),
+        ),
+        (
             "settings",
             (
                 1200,
                 Box::new(|ui| {
                     close_menu(ui);
+                    ui.app().set_playlist_sort(0);
                     // Tours never open real hardware: show example
                     // capabilities on the first hw: device.
                     let hw = ricercar_audio::device::list_devices()

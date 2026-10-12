@@ -6,6 +6,7 @@ pub mod covers;
 pub mod cue;
 pub mod library;
 pub mod meta;
+pub mod playlist_sort;
 pub mod plugin;
 pub mod profile;
 pub mod sacd;

@@ -1043,6 +1043,34 @@ msgctxt "ActionBar"
 msgid "More"
 msgstr "その他"
 
+msgctxt "ActionBar"
+msgid "Sort"
+msgstr "並べ替え"
+
+msgctxt "ActionBar"
+msgid "Playlist order"
+msgstr "プレイリストの順"
+
+msgctxt "ActionBar"
+msgid "Recently added"
+msgstr "最近追加した項目"
+
+msgctxt "ActionBar"
+msgid "Title"
+msgstr "タイトル"
+
+msgctxt "ActionBar"
+msgid "Artist"
+msgstr "アーティスト"
+
+msgctxt "ActionBar"
+msgid "Album"
+msgstr "アルバム"
+
+msgctxt "ActionBar"
+msgid "Length"
+msgstr "時間"
+
 msgctxt "ListeningHero"
 msgid "Pause"
 msgstr "一時停止"

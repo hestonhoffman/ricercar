@@ -1046,6 +1046,34 @@ msgctxt "ActionBar"
 msgid "More"
 msgstr "Plus"
 
+msgctxt "ActionBar"
+msgid "Sort"
+msgstr "Trier"
+
+msgctxt "ActionBar"
+msgid "Playlist order"
+msgstr "Ordre de la playlist"
+
+msgctxt "ActionBar"
+msgid "Recently added"
+msgstr "Ajoutés récemment"
+
+msgctxt "ActionBar"
+msgid "Title"
+msgstr "Titre"
+
+msgctxt "ActionBar"
+msgid "Artist"
+msgstr "Artiste"
+
+msgctxt "ActionBar"
+msgid "Album"
+msgstr "Album"
+
+msgctxt "ActionBar"
+msgid "Length"
+msgstr "Durée"
+
 msgctxt "ListeningHero"
 msgid "Pause"
 msgstr "Pause"

@@ -731,8 +731,8 @@ export component ContextMenu inherits Rectangle {
                 if show-folder: MenuLine { text: @tr("Show in folder"); icon: Icons.folder-open; clicked => { act("folder"); } }
                 if !is-album && TrackMenu.list == "playlist": MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
                 // A plugin playlist the user owns: its entries are edited on the service.
-                if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && TrackMenu.index > 0: MenuLine { text: @tr("Move up"); icon: Icons.chevron-up; clicked => { act("pl-up"); } }
-                if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && (TrackMenu.index < App.br-tracks.length - 1 || App.br-more): MenuLine { text: @tr("Move down"); icon: Icons.chevron-down; clicked => { act("pl-down"); } }
+                if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && App.playlist-sort == 0 && TrackMenu.index > 0: MenuLine { text: @tr("Move up"); icon: Icons.chevron-up; clicked => { act("pl-up"); } }
+                if !is-album && TrackMenu.list == "browse" && App.br-editable && App.br-can-move && App.playlist-sort == 0 && (TrackMenu.index < App.br-tracks.length - 1 || App.br-more): MenuLine { text: @tr("Move down"); icon: Icons.chevron-down; clicked => { act("pl-down"); } }
                 if !is-album && TrackMenu.list == "browse" && App.br-editable: MenuLine { text: @tr("Remove from playlist"); icon: Icons.trash; danger: true; clicked => { act("pl-remove"); } }
                 // The playlist itself (its page's menu).
                 if local-playlist: MenuLine { text: @tr("Export as M3U"); icon: Icons.upload; clicked => { act("export"); } }
