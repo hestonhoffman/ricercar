@@ -72,9 +72,9 @@
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.10.0" date="2026-10-06">
+    <release version="0.10.0" date="2026-10-12">
       <description>
-        <p>Browse by composer; a setup assistant on a fresh install (language, music folders, plugins with their sign-in, output, DAC check, fixed volume); synced lyrics highlighted word by word, timed by the lyrics or, optionally, estimated.</p>
+        <p>Browse by composer; a setup assistant on a fresh install (language, music folders, plugins with their sign-in, output, DAC check, fixed volume); synced lyrics highlighted word by word, timed by the lyrics or, optionally, estimated; playlists sorted by recently added, title, artist, album or length; a resizable sidebar.</p>
       </description>
       <url type="details">https://github.com/ricercar-player/ricercar/releases/tag/v0.10.0</url>
     </release>
