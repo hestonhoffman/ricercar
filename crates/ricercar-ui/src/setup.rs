@@ -83,6 +83,21 @@ pub fn initial_folders(configured: &[PathBuf], music: Option<&Path>) -> Vec<Path
         .unwrap_or_default()
 }
 
+/// A folder as shown: from `~` when under the home folder.
+pub fn folder_label(path: &Path, home: Option<&Path>) -> String {
+    match home.and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// `folder_label` with the home folder of this run.
+pub fn shown_folder(path: &Path) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    folder_label(path, home.as_deref().filter(|h| *h != Path::new("/")))
+}
+
 /// A catalogue entry as the plugins step offers it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Offer {
@@ -140,7 +155,7 @@ pub fn summary_lines(s: &Summary) -> Vec<(String, String)> {
             v.join("\n")
         }
     };
-    let folders = s.folders.iter().map(|f| f.display().to_string()).collect();
+    let folders = s.folders.iter().map(|f| shown_folder(f)).collect();
     let plugins = s
         .plugins
         .iter()
@@ -278,7 +293,7 @@ fn show_folders(ui: &Ui) {
         s.borrow()
             .folders
             .iter()
-            .map(|f| f.display().to_string().into())
+            .map(|f| shown_folder(f).into())
             .collect()
     });
     ui.app()
@@ -769,6 +784,20 @@ mod tests {
         let mine = vec![PathBuf::from("/path/to/flac")];
         assert_eq!(skipped_folders(true, &mine, Some(&music)), None);
         assert_eq!(skipped_folders(false, &[], Some(&music)), None);
+    }
+
+    #[test]
+    fn folder_labels() {
+        let home = Path::new("/data/listener");
+        let label = |p: &str| folder_label(Path::new(p), Some(home));
+        assert_eq!(label("/data/listener/Music"), "~/Music");
+        assert_eq!(label("/data/listener"), "~");
+        assert_eq!(
+            label("/data/listener-two/Music"),
+            "/data/listener-two/Music"
+        );
+        assert_eq!(label("/mnt/flac"), "/mnt/flac");
+        assert_eq!(folder_label(Path::new("/mnt/flac"), None), "/mnt/flac");
     }
 
     #[test]

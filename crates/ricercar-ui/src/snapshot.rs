@@ -1,8 +1,12 @@
 //! Headless screenshots for development and docs: `RICERCAR_SNAPSHOT=<dir>`
 //! renders the window with Slint's software renderer (no display needed),
 //! walks through the main views and writes one PNG per view.
+//!
+//! The tours run in a throwaway home (`isolate_home`): they never read the
+//! user's config, library or music folder, and show no personal path.
 
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,6 +21,64 @@ use crate::Page;
 use crate::app::{Ui, with_ui};
 
 type Job = Box<dyn FnOnce() + Send>;
+
+/// The per-user variables of a tour run in the throwaway home `home`:
+/// set to a path inside it, or removed (`None`).
+pub fn isolated_env(home: &Path) -> Vec<(&'static str, Option<PathBuf>)> {
+    vec![
+        ("HOME", Some(home.to_path_buf())),
+        ("XDG_CONFIG_HOME", Some(home.join(".config"))),
+        ("XDG_DATA_HOME", Some(home.join(".local/share"))),
+        ("XDG_CACHE_HOME", Some(home.join(".cache"))),
+        ("XDG_STATE_HOME", Some(home.join(".local/state"))),
+        // Read by some tools in place of user-dirs.dirs.
+        ("XDG_MUSIC_DIR", None),
+    ]
+}
+
+/// With `RICERCAR_SNAPSHOT` set, point `HOME` and the XDG directories to a
+/// throwaway home: `RICERCAR_SNAPSHOT_HOME` (kept, for runs that follow
+/// each other, like the state tour), else a new temporary directory,
+/// returned so the caller removes it at the end. The first `--library`
+/// folder (the demo library) becomes its `~/Music`, a link, so the tour
+/// shows it as the desktop's music folder.
+///
+/// # Safety
+///
+/// Changes the environment: call before any other thread starts.
+pub unsafe fn isolate_home(args: &mut ricercar_daemon::Args) -> std::io::Result<Option<PathBuf>> {
+    if std::env::var_os("RICERCAR_SNAPSHOT").is_none() {
+        return Ok(None);
+    }
+    let (home, temporary) = match std::env::var_os("RICERCAR_SNAPSHOT_HOME") {
+        Some(h) => (std::path::absolute(PathBuf::from(h))?, false),
+        None => {
+            let h = std::env::temp_dir().join(format!("ricercar-snapshot-{}", std::process::id()));
+            if h.exists() {
+                std::fs::remove_dir_all(&h)?;
+            }
+            (h, true)
+        }
+    };
+    std::fs::create_dir_all(&home)?;
+    if let Some(root) = args.roots.first_mut() {
+        let music = home.join("Music");
+        let target = std::fs::canonicalize(&*root)?;
+        if std::fs::symlink_metadata(&music).is_ok() {
+            std::fs::remove_file(&music)?;
+        }
+        std::os::unix::fs::symlink(target, &music)?;
+        *root = music;
+    }
+    for (key, value) in isolated_env(&home) {
+        match value {
+            // SAFETY: the caller guarantees no other thread runs yet.
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+    Ok(temporary.then_some(home))
+}
 
 #[derive(Clone, Default)]
 struct Queue {
@@ -1652,5 +1714,33 @@ fn plugins_tour(dir: std::path::PathBuf) {
                 let _ = slint::quit_event_loop();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_user_directory_moves_into_the_throwaway_home() {
+        let home = Path::new("/tmp/tour-home");
+        let env = isolated_env(home);
+        let keys: Vec<&str> = env.iter().map(|(k, _)| *k).collect();
+        for k in [
+            "HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_STATE_HOME",
+            "XDG_MUSIC_DIR",
+        ] {
+            assert!(keys.contains(&k), "{k}");
+        }
+        for (k, v) in &env {
+            match v {
+                Some(p) => assert!(p.starts_with(home), "{k}"),
+                None => assert_eq!(*k, "XDG_MUSIC_DIR"),
+            }
+        }
     }
 }

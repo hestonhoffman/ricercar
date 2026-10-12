@@ -228,15 +228,18 @@ RICERCAR_SNAPSHOT=/tmp/rc/shots RUST_LOG=error timeout 200 \
 
 - This renders a 1440×900 software window and walks the tour in
   `snapshot.rs`, writing one PNG per step.
-- The tour seeds plays, favorites and playlists into the database, so always
-  use the throwaway `XDG_*` directories above.
+- The tour runs in a throwaway home: `HOME` and the `XDG_*` directories
+  point to a temporary directory, removed at the end, and the `--library`
+  folder becomes its `~/Music`. Set `RICERCAR_SNAPSHOT_HOME=<dir>` to keep it
+  between runs (the state tour below).
 - The docs images live in `docs/screenshots/`, plus `docs/assets/banner.jpg`,
   which is derived from `home.png`. Refresh them when a visible feature
   changes.
 - The tours ignore `ui-state.json` (window size, last page, sorts) so they
   always start from the same state. `RICERCAR_SNAPSHOT_TOUR=state` is the
   exception: it prints the restored state, changes it and quits; run it twice
-  to check that the state survives a restart.
+  with the same `RICERCAR_SNAPSHOT_HOME` to check that the state survives a
+  restart.
 - `RICERCAR_SNAPSHOT_TOUR=stream` with `RICERCAR_SNAPSHOT_URL=<http URL>`
   plays that stream and captures the player bar while it loads, plays, and
   after seeks ahead and back: point it at a local server that answers late

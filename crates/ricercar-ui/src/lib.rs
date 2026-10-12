@@ -26,3 +26,4 @@ mod updates;
 mod views;
 
 pub use app::run;
+pub use snapshot::isolate_home as isolate_snapshot_home;

@@ -525,7 +525,7 @@ pub fn refresh_library_rows(ui: &Ui) {
         .library
         .roots
         .iter()
-        .map(|r| r.display().to_string().into())
+        .map(|r| crate::setup::shown_folder(r).into())
         .collect();
     ui.app().set_roots(ModelRc::new(VecModel::from(roots)));
 }

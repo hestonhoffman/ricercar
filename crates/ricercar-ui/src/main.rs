@@ -6,11 +6,21 @@ fn main() {
         ricercar_daemon::print_devices();
         return;
     }
-    let args = match ricercar_daemon::Args::parse(args.into_iter()) {
+    let mut args = match ricercar_daemon::Args::parse(args.into_iter()) {
         Ok(a) => a,
         Err(msg) => {
             eprintln!("{msg}");
             std::process::exit(2);
+        }
+    };
+    // Screenshot tours: a throwaway home, before anything reads the config
+    // or the XDG directories.
+    // SAFETY: no other thread is started yet.
+    let throwaway = match unsafe { ricercar_ui::isolate_snapshot_home(&mut args) } {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("ricercar: snapshot home: {e}");
+            std::process::exit(1);
         }
     };
     if !args.no_mpris && ricercar_daemon::forward_to_running(&args) {
@@ -26,7 +36,11 @@ fn main() {
         }
         return;
     }
-    if let Err(e) = ricercar_ui::run(args) {
+    let r = ricercar_ui::run(args);
+    if let Some(home) = throwaway {
+        let _ = std::fs::remove_dir_all(home);
+    }
+    if let Err(e) = r {
         startup_failed(&e.to_string());
         std::process::exit(1);
     }
