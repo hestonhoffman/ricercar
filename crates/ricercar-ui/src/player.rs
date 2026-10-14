@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use ricercar_audio::dsd::DsdMode;
 use ricercar_audio::{DeviceKind, TransportStatus};
-use ricercar_core::{CtlEvent, CtlState, Origin, PlayContext, Repeat, TrackInfo};
+use ricercar_core::{CtlEvent, CtlState, Origin, PlayContext, Repeat, TrackInfo, TrackSort};
 use ricercar_online::lyrics::{LyricLine as Line, LyricsSource};
 use slint::{ModelRc, VecModel};
 
@@ -41,6 +41,7 @@ pub struct PlayerView {
     lyric_word: i32,
     chain_sig: String,
     lib_rev_seen: u64,
+    plays_rev_seen: u64,
     lib_rev_changed_at: Option<Instant>,
     last_reload: Option<Instant>,
     was_scanning: bool,
@@ -181,6 +182,7 @@ pub fn wire(ui: &Rc<Ui>) {
 
     ui.player.borrow_mut().events = Some(ui.ctx.ctl.subscribe());
     ui.player.borrow_mut().lib_rev_seen = ui.ctx.lib.revision();
+    ui.player.borrow_mut().plays_rev_seen = ui.ctx.lib.plays_revision();
 
     let timer = slint::Timer::default();
     timer.start(
@@ -365,6 +367,24 @@ fn tick_inner(ui: &Rc<Ui>) {
         if scanning || app.get_page() == Page::Settings {
             crate::extras::refresh_library_rows(ui);
         }
+    }
+    // A play counted: only the pages that show play counts or history.
+    // Others, plugin pages above all, keep their place.
+    let plays = lib.plays_revision();
+    if std::mem::replace(&mut ui.player.borrow_mut().plays_rev_seen, plays) != plays
+        && !reload
+        && shows_plays(app.get_page(), app.get_track_sort())
+    {
+        ui.reload_page();
+    }
+}
+
+/// Pages whose content depends on play counts and history.
+fn shows_plays(page: Page, track_sort: i32) -> bool {
+    match page {
+        Page::Home | Page::Artist => true,
+        Page::Tracks => crate::views::track_sort(track_sort) == TrackSort::MostPlayed,
+        _ => false,
     }
 }
 
@@ -1220,6 +1240,17 @@ fn notify(ui: &Rc<Ui>, info: &TrackInfo, live_title: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_play_reloads_only_pages_that_show_plays() {
+        assert!(shows_plays(Page::Home, 0));
+        assert!(shows_plays(Page::Artist, 0));
+        assert!(shows_plays(Page::Tracks, 5));
+        assert!(!shows_plays(Page::Tracks, 0));
+        for p in [Page::Browse, Page::Playlist, Page::Album, Page::Search] {
+            assert!(!shows_plays(p, 5), "{p:?}");
+        }
+    }
 
     #[test]
     fn loading_shows_after_a_lasting_wait_only() {

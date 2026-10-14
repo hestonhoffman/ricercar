@@ -235,6 +235,9 @@ pub struct Library {
     /// Separate WAL reader so the UI never waits behind a scan transaction.
     reader: Option<Mutex<Connection>>,
     rev: AtomicU64,
+    /// Bumped on every play counted, apart from `rev`: a play changes only
+    /// the views that show play counts and history.
+    plays_rev: AtomicU64,
     pub progress: ScanProgress,
 }
 
@@ -654,6 +657,7 @@ impl Library {
             writer: Mutex::new(writer),
             reader: Some(Mutex::new(reader)),
             rev: AtomicU64::new(1),
+            plays_rev: AtomicU64::new(1),
             progress: ScanProgress::default(),
         })
     }
@@ -665,6 +669,7 @@ impl Library {
             writer: Mutex::new(conn),
             reader: None,
             rev: AtomicU64::new(1),
+            plays_rev: AtomicU64::new(1),
             progress: ScanProgress::default(),
         })
     }
@@ -683,6 +688,11 @@ impl Library {
     /// Bumped on every change; views compare it to know when to refresh.
     pub fn revision(&self) -> u64 {
         self.rev.load(Ordering::Relaxed)
+    }
+
+    /// Bumped on every play counted (play counts, history).
+    pub fn plays_revision(&self) -> u64 {
+        self.plays_rev.load(Ordering::Relaxed)
     }
 
     fn touch(&self) {
@@ -1495,7 +1505,7 @@ impl Library {
             params![path, now, info],
         );
         drop(conn);
-        self.touch();
+        self.plays_rev.fetch_add(1, Ordering::Relaxed);
     }
 
     // ------------------------------------------------------------ search
@@ -2153,9 +2163,12 @@ mod tests {
             ("/m/a/1.flac", tags("One", "A", "Al", Some("A"), 1)),
             ("/m/a/2.flac", tags("Two", "A", "Al", Some("A"), 2)),
         ]);
-        let rev = lib.revision();
+        let (rev, plays) = (lib.revision(), lib.plays_revision());
         lib.record_play("/m/a/2.flac");
         lib.record_play("/m/a/2.flac");
+        // A play is not a library change: open pages are not read again.
+        assert_eq!(lib.revision(), rev);
+        assert!(lib.plays_revision() > plays);
         lib.set_favorite("/m/a/1.flac", true);
         assert!(lib.revision() > rev);
         assert_eq!(lib.most_played_tracks(5)[0].play_count, 2);

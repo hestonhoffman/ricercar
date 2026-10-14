@@ -44,7 +44,7 @@ fn album_sort(i: i32) -> AlbumSort {
     }
 }
 
-fn track_sort(i: i32) -> TrackSort {
+pub(crate) fn track_sort(i: i32) -> TrackSort {
     match i {
         1 => TrackSort::Title,
         2 => TrackSort::Album,
